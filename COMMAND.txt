@@ -1,0 +1,6 @@
+To build the standalone .exe
+bashpip install pyinstaller
+cd phenoapp_full
+build_windows.bat        # Windows
+# or
+./build_unix.sh          # Linux/macOS
