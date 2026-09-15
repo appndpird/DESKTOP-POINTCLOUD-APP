@@ -18,8 +18,13 @@ Design decisions (validated on the 2025 DPIRD Fodder trials, Busselton):
   applying it needs no external ML library.
 
 Ground-truth CSV columns (template written by the Biomass tab):
-  Plot_ID, fresh_kg [, dm_frac 0-1 or dm_kg]
-Weights are per plot (same convention as the existing biomass_kg trait).
+  Plot_ID, fresh_<unit> [, dm_frac 0-1 or dm_<unit>]
+where <unit> is kg_ha, t_ha, g_m2, kg_m2 or kg (= kg per plot). Every
+target is converted to a density in kg/ha before fitting (see units.py),
+and per-plot LiDAR volumes are divided by region_area_m2, so models and
+their coefficients transfer between trials with different plot sizes.
+Predictions are written in kg/ha and, when the plot area is known, also as
+kg per plot (*_kg_plot columns).
 """
 
 from __future__ import annotations
@@ -382,44 +387,49 @@ def krr_cv_predict(X, y, mode="loo"):
 # "SPECTRA" means the full VNIR spectrum via PLS.
 MODEL_SUITE = [
     ("fresh_lidar",   "Fresh — LiDAR (mean height, intercept)",
-     "LiDAR",  "fresh_kg", ["h_mean"]),
+     "LiDAR",  "fresh_kg_ha", ["h_mean"]),
     ("fresh_lidar_p95","Fresh — LiDAR (p95 height; better for sparse/row canopies)",
-     "LiDAR",  "fresh_kg", ["h_p95"]),
+     "LiDAR",  "fresh_kg_ha", ["h_p95"]),
     ("fresh_lidar_hc","Fresh — LiDAR (p95 + cover fraction)",
-     "LiDAR",  "fresh_kg", ["h_p95", "cover_frac"]),
+     "LiDAR",  "fresh_kg_ha", ["h_p95", "cover_frac"]),
     ("fresh_vnir",    "Fresh — VNIR (NDRE)",
-     "VNIR",   "fresh_kg", ["NDRE"]),
+     "VNIR",   "fresh_kg_ha", ["NDRE"]),
     ("fresh_vnir_pls","Fresh — VNIR (full-spectrum PLS)",
-     "VNIR",   "fresh_kg", "SPECTRA"),
+     "VNIR",   "fresh_kg_ha", "SPECTRA"),
     ("fresh_fusion",  "Fresh — Fusion (NDRE + mean height)",
-     "Fusion", "fresh_kg", ["NDRE", "h_mean"]),
+     "Fusion", "fresh_kg_ha", ["NDRE", "h_mean"]),
     ("dmfrac_vnir",   "DM% — VNIR (WBI water index)",
      "VNIR",   "dm_frac",  ["WBI"]),
     ("dmfrac_vnir_pls","DM% — VNIR (full-spectrum PLS)",
      "VNIR",   "dm_frac",  "SPECTRA"),
-    ("dm_lidar",      "DM kg — LiDAR direct (reference; usually weak)",
-     "LiDAR",  "dm_kg",    ["h_mean"]),
-    ("dm_fusion",     "DM kg — Fusion direct (NDRE + WBI + mean height)",
-     "Fusion", "dm_kg",    ["NDRE", "WBI", "h_mean"]),
+    ("dm_lidar",      "DM — LiDAR direct (reference; usually weak)",
+     "LiDAR",  "dm_kg_ha", ["h_mean"]),
+    ("dm_fusion",     "DM — Fusion direct (NDRE + WBI + mean height)",
+     "Fusion", "dm_kg_ha", ["NDRE", "WBI", "h_mean"]),
     # multi-feature machine-learning models (hyperparameters by inner CV;
     # with ~36 calibration plots these only sometimes beat the simple
     # models - the validated columns will tell you)
     ("fresh_ridge",   "Fresh — Ridge regression (all LiDAR+VNIR features)",
-     "Fusion", "fresh_kg", "RIDGE"),
+     "Fusion", "fresh_kg_ha", "RIDGE"),
     ("fresh_krr",     "Fresh — Kernel ridge RBF (nonlinear, all features)",
-     "Fusion", "fresh_kg", "KRR"),
-    ("dm_ridge",      "DM kg — Ridge regression (all features)",
-     "Fusion", "dm_kg",    "RIDGE"),
+     "Fusion", "fresh_kg_ha", "KRR"),
+    ("dm_ridge",      "DM — Ridge regression (all features)",
+     "Fusion", "dm_kg_ha", "RIDGE"),
 ]
 
 
 def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
-                    enabled=None, progress_cb=None, cv: str = "loo"):
+                    enabled=None, progress_cb=None, cv: str = "loo",
+                    gt_unit: str = "auto"):
     """Fit + cross-validate the whole suite.
 
-    df          : merged per-plot DataFrame containing Plot_ID and any of
-                  h_mean, NDRE, WBI (etc.)
-    gt          : DataFrame with Plot_ID, fresh_kg [, dm_frac / dm_kg]
+    df          : merged per-plot DataFrame containing Plot_ID, region_area_m2
+                  and any of h_mean, NDRE, WBI (etc.)
+    gt          : DataFrame with Plot_ID, fresh_<unit> [, dm_frac / dm_<unit>]
+                  in any biomass unit; converted to kg/ha internally
+    gt_unit     : 'auto' (from the column name: fresh_kg_ha, fresh_t_ha,
+                  fresh_g_m2, fresh_kg_m2, fresh_kg = kg per plot) or an
+                  explicit key from phenoapp.core.units.BIOMASS_UNITS
     spectra     : optional (n, bands) array aligned with spectra_ids
     spectra_ids : Plot_ID list matching spectra rows
     enabled     : optional set of model keys to fit
@@ -431,13 +441,42 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
     Returns (results, predictions_df).
     """
     import pandas as pd
+    from .units import (resolve_unit, to_kg_m2, kg_m2_to_kg_ha,
+                        area_normalise, AREA_SCALED_FEATURES)
 
+    # per-plot LiDAR volumes -> per m², so every predictor is a density
+    df, _normed = area_normalise(df, sorted(AREA_SCALED_FEATURES)) \
+        if "region_area_m2" in df.columns else (df.copy(), [])
+
+    # ground truth -> kg/ha densities named fresh_kg_ha / dm_kg_ha
     gt = gt.copy()
-    if "dm_frac" not in gt.columns and {"dm_kg", "fresh_kg"} <= set(gt.columns):
+    area_by_plot = (df.set_index("Plot_ID")["region_area_m2"]
+                    if "region_area_m2" in df.columns else None)
+    gt_units = {}
+    for stem in ("fresh", "dm"):
+        col = next((c for c in gt.columns
+                    if c.lower().startswith(stem) and c.lower() != "dm_frac"
+                    and c.lower() != f"{stem}_kg_ha"), None)
+        if f"{stem}_kg_ha" in gt.columns:
+            gt[f"{stem}_kg_ha"] = pd.to_numeric(gt[f"{stem}_kg_ha"], errors="coerce")
+            gt_units[stem] = "kg_ha"
+            continue
+        if col is None:
+            continue
+        unit_key = resolve_unit(gt_unit, col, default="kg_plot")
+        area = (gt["Plot_ID"].map(area_by_plot).to_numpy(float)
+                if area_by_plot is not None else None)
+        dens = to_kg_m2(pd.to_numeric(gt[col], errors="coerce").to_numpy(float),
+                        unit_key, area)
+        gt[f"{stem}_kg_ha"] = kg_m2_to_kg_ha(dens)
+        gt_units[stem] = unit_key
+    if "dm_frac" in gt.columns:
+        gt["dm_frac"] = pd.to_numeric(gt["dm_frac"], errors="coerce")
+    if "dm_frac" not in gt.columns and {"dm_kg_ha", "fresh_kg_ha"} <= set(gt.columns):
         with np.errstate(divide="ignore", invalid="ignore"):
-            gt["dm_frac"] = gt["dm_kg"] / gt["fresh_kg"]
-    if "dm_kg" not in gt.columns and {"dm_frac", "fresh_kg"} <= set(gt.columns):
-        gt["dm_kg"] = gt["dm_frac"] * gt["fresh_kg"]
+            gt["dm_frac"] = gt["dm_kg_ha"] / gt["fresh_kg_ha"]
+    if "dm_kg_ha" not in gt.columns and {"dm_frac", "fresh_kg_ha"} <= set(gt.columns):
+        gt["dm_kg_ha"] = gt["dm_frac"] * gt["fresh_kg_ha"]
 
     merged = df.merge(gt, on="Plot_ID", how="inner", suffixes=("", "_gt"))
     results = {}
@@ -636,22 +675,38 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
     dm_col = next((f"pred_{k}" for k in ("dmfrac_vnir_pls", "dmfrac_vnir")
                    if f"pred_{k}" in pred_df.columns), None)
     if fresh_col and dm_col:
-        pred_df["pred_dm_kg_derived"] = pred_df[fresh_col] * pred_df[dm_col]
-        if "dm_kg" in merged.columns:
-            chk = merged[["Plot_ID", "dm_kg"]].merge(
-                pred_df[["Plot_ID", "pred_dm_kg_derived"]], on="Plot_ID"
+        pred_df["pred_dm_kg_ha_derived"] = pred_df[fresh_col] * pred_df[dm_col]
+        if "dm_kg_ha" in merged.columns:
+            chk = merged[["Plot_ID", "dm_kg_ha"]].merge(
+                pred_df[["Plot_ID", "pred_dm_kg_ha_derived"]], on="Plot_ID"
             ).dropna()
             if len(chk) >= 3:
-                mder = regression_metrics(chk["dm_kg"].values,
-                                          chk["pred_dm_kg_derived"].values)
+                mder = regression_metrics(chk["dm_kg_ha"].values,
+                                          chk["pred_dm_kg_ha_derived"].values)
                 results["dm_kg_derived"] = {
-                    "label": "DM kg — derived (fresh_pred x DM%_pred)",
-                    "modality": "Fusion", "target": "dm_kg",
+                    "label": "DM — derived (fresh_pred x DM%_pred)",
+                    "modality": "Fusion", "target": "dm_kg_ha",
                     "n": mder["n"],
                     "loocv_rmse": mder["rmse"], "loocv_r2": mder["r2"],
                     "metrics_cv": mder, "metrics_fit": mder, "cv_mode": cv,
                     "status": "ok (errors compound; treat as indicative)",
                 }
+
+    # ---- units: tag every result/model, add per-plot kg columns ----
+    for key, r in results.items():
+        tgt = r.get("target", "")
+        unit = "0-1" if tgt == "dm_frac" else ("kg/ha" if tgt.endswith("_kg_ha") else "")
+        r["target_unit"] = unit
+        if r.get("model") is not None:
+            r["model"]["target_unit"] = unit
+            r["model"]["area_normalised"] = list(_normed)
+            r["model"]["gt_units"] = gt_units
+    if "region_area_m2" in df.columns:
+        area = df.set_index("Plot_ID")["region_area_m2"]
+        pred_df["region_area_m2"] = pred_df["Plot_ID"].map(area)
+        for c in [c for c in pred_df.columns if c.startswith(("pred_", "predcv_"))
+                  and "dmfrac" not in c and not c.endswith("_kg_plot")]:
+            pred_df[c + "_kg_plot"] = pred_df[c] * pred_df["region_area_m2"] / 10_000.0
 
     return results, pred_df
 
@@ -680,7 +735,10 @@ def results_table(results: dict, detail: bool = True) -> str:
 
     hdr = (f"{'model':<46}{'n':>4}{'R2':>7}{'RMSE':>9}{'RMSE%':>8}"
            f"{'MAE':>8}{'Acc%':>7}{'bias':>8}{'r':>6}{'fitR2':>7}  status")
-    lines = [f"validation mode: {CV_MODES.get(cv_mode, cv_mode)}", hdr]
+    lines = [f"validation mode: {CV_MODES.get(cv_mode, cv_mode)}",
+             "units: fresh / DM targets and their RMSE, MAE and bias are in "
+             "kg/ha (ground truth converted from its own unit); DM% is 0-1",
+             hdr]
     for r in results.values():
         if not r.get("status", "").startswith("ok"):
             lines.append(f"{r['label']:<46}{'-':>4}"
@@ -706,7 +764,13 @@ def save_models(results: dict, path: str):
                 if kk in r}
             for k, r in results.items() if r.get("status", "").startswith("ok")}
     with open(path, "w") as f:
-        json.dump({"models": out, "validation": meta}, f, indent=2)
+        json.dump({"models": out, "validation": meta,
+                   "target_unit": "kg/ha (dm_frac: 0-1)",
+                   "note": ("Predictors listed in each model's "
+                            "'area_normalised' are per m² (metric / "
+                            "region_area_m2). Multiply kg/ha by "
+                            "region_area_m2 / 10000 for kg per plot.")},
+                  f, indent=2)
 
 
 def load_models(path: str) -> dict:

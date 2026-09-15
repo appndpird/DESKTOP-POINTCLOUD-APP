@@ -26,6 +26,7 @@ BIOMASS_K_PRESETS = {
 }
 
 from phenoapp.core.project import state
+from phenoapp.core.units import AUTO_LABEL, UNIT_LABELS, UNIT_KEYS
 from phenoapp.core import (
     LASManager, load_grid, extract_all_plots,
     TRAITS_CATALOG, TRAIT_KEYS,
@@ -112,7 +113,7 @@ class TraitsTab(QWidget):
 
         # Recommended defaults
         defaults = {"h_p95", "h_p99", "h_mean", "h_std", "cover_frac",
-                    "vol_voxel", "biomass_pvi", "biomass_kg",
+                    "vol_voxel", "biomass_pvi", "biomass_kg", "biomass_kg_ha",
                     "lodging_angle", "roughness",
                     "h_ground_p1", "h_max_local", "h_p95_local",
                     "n_points", "n_canopy"}
@@ -198,8 +199,11 @@ class TraitsTab(QWidget):
         self.btn_fit_k = QPushButton("Fit k from CSV...")
         self.btn_fit_k.clicked.connect(self._on_fit_k)
         self.btn_fit_k.setToolTip(
-            "Fit k by least squares from a ground-truth CSV.\n"
-            "Required columns: Plot_ID, biomass_kg.\n"
+            "Fit k (kg per m^3 of canopy) by least squares from a ground-truth CSV.\n"
+            "Required columns: Plot_ID and a biomass column in ANY unit -\n"
+            "kg/ha, t/ha, g/m^2, kg/m^2 or kg per plot (choose the unit on the\n"
+            "right, or name the column biomass_kg_ha / biomass_kg and use Auto).\n"
+            "The fit is per m^2, so k does not depend on plot size.\n"
             "Run Compute Traits first so the metrics CSV (with biomass_pvi) exists.")
         bio_row.addWidget(self.cb_biomass_preset, stretch=2)
         bio_row.addWidget(self.dsb_biomass_k,     stretch=1)
@@ -211,18 +215,34 @@ class TraitsTab(QWidget):
         self.btn_template = QPushButton("Save biomass template CSV...")
         self.btn_template.clicked.connect(self._on_save_template)
         self.btn_template.setToolTip(
-            "Write a ready-to-fill ground-truth CSV (Plot_ID, biomass_kg) "
-            "pre-populated with your plot IDs, so you can enter harvested "
-            "weights and feed it back to the fitters.")
+            "Write a ready-to-fill ground-truth CSV (Plot_ID, biomass_kg_ha) "
+            "pre-populated with your plot IDs. Enter biomass in kg/ha, or "
+            "rename the column to the unit you have (biomass_t_ha, "
+            "biomass_g_m2, biomass_kg for kg per plot) and feed it back to "
+            "the fitters.")
         self.btn_fit_multi = QPushButton("Fit multi-metric model from CSV...")
         self.btn_fit_multi.clicked.connect(self._on_fit_multi)
         self.btn_fit_multi.setToolTip(
             "Fit a multiple-regression biomass model\n"
-            "  biomass_kg = b0 + b1*h_p95 + b2*cover_frac + b3*vol_voxel\n"
-            "from a ground-truth CSV (Plot_ID, biomass_kg), then write a\n"
-            "biomass_pred_kg column for every plot. Usually more accurate\n"
-            "than the single-k PVI model. Tick h_p95, cover_frac and\n"
-            "vol_voxel and run Compute Traits first.")
+            "  biomass_kg_ha = b0 + b1*h_p95 + b2*cover_frac + b3*vol_voxel/m^2\n"
+            "from a ground-truth CSV (Plot_ID + biomass in any unit), then\n"
+            "write biomass_pred_kg_ha and biomass_pred_kg for every plot.\n"
+            "Per-plot volumes are divided by plot area so the model is a\n"
+            "density and transfers between trials. Tick h_p95, cover_frac\n"
+            "and vol_voxel and run Compute Traits first.")
+        self.cb_gt_unit = QComboBox()
+        self.cb_gt_unit.addItem(AUTO_LABEL)
+        for k in UNIT_KEYS:
+            self.cb_gt_unit.addItem(UNIT_LABELS[k])
+        self.cb_gt_unit.setToolTip(
+            "Unit of the biomass column in your ground-truth CSV.\n"
+            "Auto-detect reads it from the column name (biomass_kg_ha, "
+            "biomass_t_ha, biomass_g_m2, biomass_kg_m2, biomass_kg = kg per "
+            "plot). Pick a unit explicitly if the column is just 'biomass'.\n"
+            "Both fitters convert to kg/m^2 internally, so k and the model "
+            "coefficients are independent of plot size.")
+        model_row.addWidget(QLabel("Ground-truth unit:"))
+        model_row.addWidget(self.cb_gt_unit, stretch=1)
         model_row.addWidget(self.btn_template)
         model_row.addWidget(self.btn_fit_multi)
         model_row.addStretch()
@@ -252,6 +272,10 @@ class TraitsTab(QWidget):
         self.log.setMaximumHeight(140)
         v.addWidget(self.log)
 
+    def _gt_unit(self) -> str:
+        i = self.cb_gt_unit.currentIndex()
+        return "auto" if i <= 0 else UNIT_KEYS[i - 1]
+
     def _on_biomass_preset(self, label):
         val = BIOMASS_K_PRESETS.get(label)
         if val is not None:
@@ -267,25 +291,29 @@ class TraitsTab(QWidget):
                 "(it must contain a biomass_pvi column).")
             return
         gt_path, _ = QFileDialog.getOpenFileName(
-            self, "Pick ground-truth CSV (must have Plot_ID + biomass_kg columns)",
+            self, "Pick ground-truth CSV (Plot_ID + biomass column, any unit)",
             os.path.dirname(s.out_csv or ""), "CSV files (*.csv);;All files (*)")
         if not gt_path:
             return
         try:
-            r = fit_biomass_k(s.out_csv, gt_path)
+            r = fit_biomass_k(s.out_csv, gt_path, gt_unit=self._gt_unit())
         except Exception as e:
             QMessageBox.critical(self, "Fit failed", str(e))
             return
         self.dsb_biomass_k.setValue(r["k"])
         self.cb_biomass_preset.setCurrentIndex(0)   # "Custom"
         QMessageBox.information(self, "Fit complete",
-            f"Fitted k = {r['k']:.4f} kg per m^3 PVI\n"
+            f"Fitted k = {r['k']:.4f} kg per m^3 of canopy\n"
+            f"(biomass kg/m^2 = k x cover_frac x h_p95; independent of plot size)\n\n"
+            f"Ground truth: column '{r['gt_col']}' read as {r['unit_label']}\n"
             f"n = {r['n']} plots matched\n"
             f"R^2 = {r['r2']:.3f}\n"
-            f"RMSE = {r['rmse']:.3f} kg\n"
-            f"PVI range:  {r['pvi_range'][0]:.2f} .. {r['pvi_range'][1]:.2f}\n"
-            f"GT range:   {r['gt_range'][0]:.2f} .. {r['gt_range'][1]:.2f}\n\n"
-            f"Click Compute Traits to apply k to all plots.")
+            f"RMSE = {r['rmse_kg_ha']:.0f} kg/ha   (leave-one-out {r['loocv_rmse_kg_ha']:.0f} kg/ha)\n"
+            f"Canopy depth range: {r['depth_range'][0]:.3f} .. {r['depth_range'][1]:.3f} m\n"
+            f"GT range: {r['gt_range_kg_ha'][0]:.0f} .. {r['gt_range_kg_ha'][1]:.0f} kg/ha\n"
+            f"Plot region area: {r['area_range_m2'][0]:.2f} .. {r['area_range_m2'][1]:.2f} m^2\n\n"
+            f"Click Compute Traits to apply k to all plots "
+            f"(biomass_kg per plot and biomass_kg_ha).")
 
     def _on_save_template(self):
         """Write a ground-truth CSV template pre-filled with plot IDs."""
@@ -315,7 +343,7 @@ class TraitsTab(QWidget):
         if not path:
             return
         try:
-            pd.DataFrame({"Plot_ID": plot_ids, "biomass_kg": [""] * len(plot_ids)}) \
+            pd.DataFrame({"Plot_ID": plot_ids, "biomass_kg_ha": [""] * len(plot_ids)}) \
                 .to_csv(path, index=False)
         except Exception as e:
             QMessageBox.critical(self, "Save failed", str(e))
@@ -323,9 +351,12 @@ class TraitsTab(QWidget):
         QMessageBox.information(self, "Template saved",
             f"Template written to:\n{path}\n\n"
             f"{len(plot_ids)} plot rows.\n\n"
-            "Fill the 'biomass_kg' column with your harvested (cut-and-weigh) "
-            "weight for each plot, leave rows you didn't sample blank, then use "
-            "'Fit k from CSV...' or 'Fit multi-metric model from CSV...'.")
+            "Fill the 'biomass_kg_ha' column with biomass in kg/ha (quadrat "
+            "cut scaled to a hectare). If your data are in another unit, "
+            "rename the column: biomass_t_ha, biomass_g_m2, biomass_kg_m2, or "
+            "biomass_kg for a whole-plot weight in kg - or pick the unit in "
+            "the 'Ground-truth unit' box. Leave rows you didn't sample blank, "
+            "then use 'Fit k from CSV...' or 'Fit multi-metric model from CSV...'.")
 
     def _on_fit_multi(self):
         """Fit a multiple-regression biomass model and write predictions."""
@@ -336,24 +367,28 @@ class TraitsTab(QWidget):
                 "so the metrics CSV with those predictor columns exists.")
             return
         gt_path, _ = QFileDialog.getOpenFileName(
-            self, "Pick ground-truth CSV (Plot_ID + biomass_kg columns)",
+            self, "Pick ground-truth CSV (Plot_ID + biomass column, any unit)",
             os.path.dirname(s.out_csv or ""), "CSV files (*.csv);;All files (*)")
         if not gt_path:
             return
         try:
             model = fit_biomass_multi(s.out_csv, gt_path,
-                                      predictors=BIOMASS_MODEL_PREDICTORS)
+                                      predictors=BIOMASS_MODEL_PREDICTORS,
+                                      gt_unit=self._gt_unit())
             n_pred = apply_biomass_multi(s.out_csv, model)
         except Exception as e:
             QMessageBox.critical(self, "Fit failed", str(e))
             return
         QMessageBox.information(self, "Multi-metric model fitted",
-            f"{model['equation']}\n\n"
+            f"{model['equation']}\n"
+            f"(predictors marked /m^2 are divided by plot area; model is a density)\n\n"
+            f"Ground truth: column '{model['gt_col']}' read as {UNIT_LABELS[model['gt_unit']]}\n"
             f"n = {model['n']} plots matched\n"
             f"R^2 = {model['r2']:.3f}   (adjusted R^2 = {model['adj_r2']:.3f})\n"
-            f"RMSE = {model['rmse']:.3f} kg\n\n"
-            f"Wrote 'biomass_pred_kg' for {n_pred} plots into:\n{s.out_csv}\n\n"
-            "Open the Statistics tab to visualize biomass_pred_kg.")
+            f"RMSE = {model['rmse']:.0f} kg/ha\n"
+            f"Leave-one-out: RMSE = {model['loocv_rmse']:.0f} kg/ha, R^2 = {model['loocv_r2']:.3f}\n\n"
+            f"Wrote 'biomass_pred_kg_ha' and 'biomass_pred_kg' for {n_pred} plots into:\n{s.out_csv}\n\n"
+            "Open the Statistics tab to visualize biomass_pred_kg_ha.")
 
     def _sel_all(self):
         for cb in self._checks.values(): cb.setChecked(True)
@@ -361,7 +396,7 @@ class TraitsTab(QWidget):
         for cb in self._checks.values(): cb.setChecked(False)
     def _defaults(self):
         defaults = {"h_p95", "h_p99", "h_mean", "h_std", "cover_frac",
-                    "vol_voxel", "biomass_pvi", "biomass_kg",
+                    "vol_voxel", "biomass_pvi", "biomass_kg", "biomass_kg_ha",
                     "lodging_angle", "roughness",
                     "h_ground_p1", "h_max_local", "h_p95_local",
                     "n_points", "n_canopy"}

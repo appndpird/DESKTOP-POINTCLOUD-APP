@@ -115,26 +115,39 @@ absolute values.
 | **vol_chull** | 3-D scipy ConvexHull | Fast, overestimates |
 | **vol_alpha** | Concave-hull volume (column-integrated) | Closer to true canopy envelope |
 | **surf_area** | Triangulated canopy-top area × roughness factor | For light-interception models |
-| **biomass_pvi** | Plant Volume Index = cover_frac × h_p95 × plot_area (m³) | Standard single-metric UAV biomass proxy |
-| **biomass_kg** | biomass_pvi × k | PVI scaled to kg by one calibration coefficient |
+| **biomass_pvi** | Plant Volume Index = cover_frac × h_p95 × region_area (m³ per plot) | Standard single-metric UAV biomass proxy |
+| **biomass_kg** | biomass_pvi × k | Total biomass in the sampled region (kg per plot) |
+| **biomass_kg_ha** | k × cover_frac × h_p95 × 10 000 | The same calibration as a density (kg/ha), comparable across plot sizes |
 
 ---
 
-## Estimating biomass (kg) from LiDAR
+## Estimating biomass from LiDAR
 
 The point cloud gives you **proxies** (PVI, voxel volume, height, cover); turning
-those into **kilograms** needs field calibration. The app offers two routes,
+those into **biomass** needs field calibration. The app offers two routes,
 both driven by a small **ground-truth CSV** of harvested weights.
+
+> **Units.** Ground truth may be in **any** unit — kg/ha, t/ha, g/m², kg/m² or a
+> whole-plot weight in kg. Everything is converted to an area density (kg/m²)
+> before fitting, and per-plot LiDAR volumes are divided by the plot region
+> area, so *k* and the model coefficients **do not depend on plot size** and can
+> be reused on another trial. Results are reported in **kg/ha**; per-plot totals
+> (kg) are written alongside for convenience.
 
 ### The ground-truth CSV — what goes in it
 
 This is the "excel sheet" for biomass. It is a plain CSV (open/edit in Excel)
-with exactly two columns:
+with two columns:
 
 | Column | Meaning |
 |---|---|
 | `Plot_ID` | The plot identifier — **must match** the `Plot_ID` in your grid / `plot_metrics.csv` (e.g. `1001`, `1002`, …) |
-| `biomass_kg` | The measured biomass for that plot, from **cut-and-weigh** sampling (fresh or dry — just be consistent) |
+| `biomass_kg_ha` | The measured biomass for that plot from **cut-and-weigh** sampling, in kg/ha (fresh or dry — just be consistent) |
+
+The unit is read from the column name: `biomass_kg_ha`, `biomass_t_ha`,
+`biomass_g_m2`, `biomass_kg_m2`, or `biomass_kg` for a whole-plot weight in kg.
+If your column is just `biomass`, pick the unit in the **Ground-truth unit** box
+next to the fit buttons (it also overrides the column name when set).
 
 You do **not** need every plot — even 10–30 sampled plots are enough to
 calibrate, as long as they span low-to-high biomass. Leave un-sampled rows blank.
@@ -147,9 +160,12 @@ calibrate, as long as they span low-to-high biomass. Leave un-sampled rows blank
 1. Tick **biomass_pvi** (and **biomass_kg**) and **Compute Traits** →
    `plot_metrics.csv` now has a `biomass_pvi` column.
 2. Harvest & weigh some plots; fill the ground-truth CSV.
-3. Click **"Fit k from CSV…"**. It least-squares fits `biomass_kg = k × PVI`
-   (through the origin) and reports *k*, R² and RMSE.
-4. **Compute Traits** again to write the calibrated `biomass_kg` for every plot.
+3. Click **"Fit k from CSV…"**. It least-squares fits
+   `biomass (kg/m²) = k × cover_frac × h_p95` (through the origin; this is
+   `k × PVI / region_area`) and reports *k* in kg per m³ of canopy, R², RMSE
+   and leave-one-out RMSE in kg/ha.
+4. **Compute Traits** again to write the calibrated `biomass_kg` (per plot) and
+   `biomass_kg_ha` for every plot.
 
 Starting-point *k* values (no field data yet): wheat ≈ 0.28, barley ≈ 0.25,
 fodder grass / pasture ≈ 0.10. These are rough — always calibrate when you can.
@@ -160,19 +176,20 @@ A single index rarely captures biomass across a whole season. The app can fit a
 **multiple linear regression** on several LiDAR metrics at once:
 
 ```
-biomass_kg = b0 + b1·h_p95 + b2·cover_frac + b3·vol_voxel
+biomass_kg_ha = b0 + b1·h_p95 + b2·cover_frac + b3·(vol_voxel / region_area)
 ```
 
 1. Tick **h_p95**, **cover_frac** and **vol_voxel**, then **Compute Traits**.
 2. Fill the ground-truth CSV as above.
 3. Click **"Fit multi-metric model from CSV…"**. It solves the coefficients by
-   least squares, reports the equation, R² (and adjusted R²) and RMSE, and
-   writes a **`biomass_pred_kg`** column for every plot in `plot_metrics.csv`.
+   least squares, reports the equation, R² (and adjusted R²), RMSE and the
+   leave-one-out RMSE in kg/ha, and writes **`biomass_pred_kg_ha`** and
+   **`biomass_pred_kg`** (per plot) columns for every plot in `plot_metrics.csv`.
 
 This usually beats the single-*k* model because height, canopy cover and 3-D
 occupancy each carry independent information about standing biomass. Compare the
-two R² values to see which model your data supports; view `biomass_pred_kg` in
-the Statistics tab.
+two R² values to see which model your data supports; view `biomass_pred_kg_ha`
+in the Statistics tab.
 
 ### Which LiDAR metrics matter for biomass?
 

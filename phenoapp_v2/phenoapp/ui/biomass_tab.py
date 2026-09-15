@@ -6,7 +6,8 @@ Workflow:
   2. (optional) Point at the VNIR hyperspectral orthomosaic (.bin ENVI) and
      click "Compute VNIR indices + spectra" -> per-plot NDVI/NDRE/WBI + full
      mean spectra, sampled over the SAME region as the LiDAR traits.
-  3. Save/fill the ground-truth template (fresh_kg, dm_frac or dm_kg).
+  3. Save/fill the ground-truth template (fresh_kg_ha, dm_frac or dm_kg_ha;
+     any biomass unit is accepted - see 'Ground-truth unit').
   4. "Fit & validate models" -> the whole suite (LiDAR / VNIR / fusion,
      fresh + DM) is fitted with leave-one-out cross-validation and ranked.
   5. Predictions for every plot are written next to the metrics CSV; models
@@ -33,6 +34,7 @@ from PyQt5.QtWidgets import (
 )
 
 from phenoapp.core.project import state
+from phenoapp.core.units import AUTO_LABEL, UNIT_LABELS, UNIT_KEYS
 from phenoapp.core import load_grid, plot_region, VNIRCube
 from phenoapp.core.models import (fit_model_suite, results_table, save_models,
                                   MODEL_SUITE)
@@ -93,16 +95,17 @@ class _FitWorker(QThread):
     error    = pyqtSignal(str)
 
     def __init__(self, metrics_csv, vnir_csv, spectra_npz, gt_csv,
-                 out_pred_csv, out_models_json, cv_mode="loo", enabled=None):
+                 out_pred_csv, out_models_json, cv_mode="loo", enabled=None,
+                 gt_unit="auto"):
         super().__init__()
         self._a = (metrics_csv, vnir_csv, spectra_npz, gt_csv,
-                   out_pred_csv, out_models_json, cv_mode, enabled)
+                   out_pred_csv, out_models_json, cv_mode, enabled, gt_unit)
 
     def run(self):
         try:
             import pandas as pd
             (metrics_csv, vnir_csv, spectra_npz, gt_csv,
-             out_pred_csv, out_models_json, cv_mode, enabled) = self._a
+             out_pred_csv, out_models_json, cv_mode, enabled, gt_unit) = self._a
 
             df = pd.read_csv(metrics_csv)
             if vnir_csv and os.path.exists(vnir_csv):
@@ -113,15 +116,19 @@ class _FitWorker(QThread):
                 z = np.load(spectra_npz, allow_pickle=False)
                 spectra = z["spectra"]; spectra_ids = list(z["plot_ids"])
             gt = pd.read_csv(gt_csv)
-            if "Plot_ID" not in gt.columns or "fresh_kg" not in gt.columns:
+            has_fresh = any(c.lower().startswith("fresh") for c in gt.columns)
+            if "Plot_ID" not in gt.columns or not has_fresh:
                 raise RuntimeError(
-                    "Ground-truth CSV must have Plot_ID and fresh_kg columns "
-                    "(plus optional dm_frac or dm_kg).")
+                    "Ground-truth CSV must have Plot_ID and a fresh biomass "
+                    "column - fresh_kg_ha, fresh_t_ha, fresh_g_m2, fresh_kg_m2 "
+                    "or fresh_kg (kg per plot) - plus optional dm_frac or "
+                    "dm_<unit>.")
 
             def cb(p, m): self.progress.emit(int(p * 0.95), m)
             results, pred = fit_model_suite(df, gt, spectra, spectra_ids,
                                             enabled=enabled,
-                                            progress_cb=cb, cv=cv_mode)
+                                            progress_cb=cb, cv=cv_mode,
+                                            gt_unit=gt_unit)
             pred.to_csv(out_pred_csv, index=False)
             save_models(results, out_models_json)
 
@@ -133,7 +140,9 @@ class _FitWorker(QThread):
                     "that never saw it); Acc% = 100 - MAPE ('simple "
                     "accuracy'); fitR2 is in-sample - the gap between fitR2 "
                     "and R2 is overfitting. Compare RMSE to the ground-truth "
-                    "std-dev: equal means no skill.")
+                    "std-dev: equal means no skill. All biomass values are "
+                    "kg/ha; *_kg_plot columns in the predictions CSV give "
+                    "kg per plot (kg/ha x region_area_m2 / 10000).")
             self.progress.emit(100, "Fitting complete")
             self.done_ok.emit(txt)
         except Exception as e:
@@ -215,6 +224,18 @@ class BiomassTab(QWidget):
             "Fit only: the model is scored on the plots it was trained on. "
             "Always looks better than reality; the in-sample R2 is also "
             "shown as 'fitR2' in every mode so you can see the gap.")
+        self.cb_gt_unit = QComboBox()
+        self.cb_gt_unit.addItem(AUTO_LABEL)
+        for k in UNIT_KEYS:
+            self.cb_gt_unit.addItem(UNIT_LABELS[k])
+        self.cb_gt_unit.setToolTip(
+            "Unit of the fresh / DM biomass columns in the ground-truth CSV.\n"
+            "Auto-detect reads it from the column name (fresh_kg_ha, "
+            "fresh_t_ha, fresh_g_m2, fresh_kg_m2; fresh_kg = kg per plot).\n"
+            "Everything is converted to kg/ha before fitting and per-plot "
+            "LiDAR volumes are divided by plot area, so the models transfer "
+            "between trials with different plot sizes.")
+        gform.addRow("Ground-truth unit:", self.cb_gt_unit)
         gform.addRow("Validation:", self.cb_cv)
 
         row3 = QHBoxLayout()
@@ -245,7 +266,7 @@ class BiomassTab(QWidget):
 
     def _pick_gt(self):
         p, _ = QFileDialog.getOpenFileName(
-            self, "Pick ground-truth CSV (Plot_ID, fresh_kg[, dm_frac|dm_kg])",
+            self, "Pick ground-truth CSV (Plot_ID, fresh_<unit>[, dm_frac|dm_<unit>])",
             "", "CSV files (*.csv);;All files (*)")
         if p:
             self.ed_gt.setText(p)
@@ -275,13 +296,15 @@ class BiomassTab(QWidget):
         if not path:
             return
         pd.DataFrame({"Plot_ID": plot_ids,
-                      "fresh_kg": [""] * len(plot_ids),
+                      "fresh_kg_ha": [""] * len(plot_ids),
                       "dm_frac": [""] * len(plot_ids),
-                      "dm_kg": [""] * len(plot_ids)}).to_csv(path, index=False)
+                      "dm_kg_ha": [""] * len(plot_ids)}).to_csv(path, index=False)
         QMessageBox.information(self, "Template saved",
-            f"{path}\n\nFill fresh_kg (field-weighed wet strip weight per "
-            "plot, kg) and either dm_frac (0-1, from oven-dried subsample) "
-            "or dm_kg. Leave unsampled plots blank.")
+            f"{path}\n\nFill fresh_kg_ha (fresh biomass in kg/ha) and either "
+            "dm_frac (0-1, from an oven-dried subsample) or dm_kg_ha. If your "
+            "data are in another unit, rename the columns (fresh_t_ha, "
+            "fresh_g_m2, fresh_kg for a whole-plot weight in kg) or pick the "
+            "unit in the 'Ground-truth unit' box. Leave unsampled plots blank.")
 
     # ------------------------------------------------------------------
     def _run_vnir(self):
@@ -330,10 +353,12 @@ class BiomassTab(QWidget):
         enabled = {k for k, _, modality, _, _ in MODEL_SUITE
                    if modality in mods}
         self.btn_fit.setEnabled(False)
+        i = self.cb_gt_unit.currentIndex()
+        gt_unit = "auto" if i <= 0 else UNIT_KEYS[i - 1]
         self._wf = _FitWorker(s.out_csv, s.vnir_csv, s.vnir_spectra, gt,
                               base + "_biomass_predictions.csv",
                               base + "_biomass_models.json", cv_mode,
-                              enabled)
+                              enabled, gt_unit)
         self._wf.progress.connect(self._on_prog)
         self._wf.done_ok.connect(self._on_fit_done)
         self._wf.error.connect(self._on_err)

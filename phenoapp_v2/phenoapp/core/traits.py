@@ -72,15 +72,19 @@ TRAITS_CATALOG = [
     ("surf_area",   "Volume", "3D surface area",
         "Triangulated canopy surface area. For light-interception models."),
     ("biomass_pvi", "Volume", "Biomass proxy (PVI = cover x h_p95 x area)",
-        "Plant Volume Index: cover_frac * h_p95 * plot_area (m^3). Standard "
-        "UAV biomass proxy. Use a species-specific calibration coefficient "
-        "(multiply by density) to convert to kg/m^2."),
-    ("biomass_kg",  "Volume", "Calibrated biomass (kg) = PVI x k",
-        "Plant Volume Index scaled by a user-supplied coefficient k "
-        "(see the 'Biomass k' parameter). Set k from cut-and-weigh "
-        "calibration, or use a published value: wheat ~0.25-0.30, "
-        "barley ~0.20-0.30, fodder grass ~0.08-0.15 (fresh weight). "
-        "With k=1.0, biomass_kg equals biomass_pvi."),
+        "Plant Volume Index: cover_frac * h_p95 * region_area (m^3 per "
+        "plot). Standard UAV biomass proxy. PVI / region_area_m2 = "
+        "cover_frac * h_p95 is the area-free canopy depth (m) used for "
+        "calibration, so k transfers between plot sizes."),
+    ("biomass_kg",  "Volume", "Calibrated biomass per plot (kg) = PVI x k",
+        "Total biomass in the sampled region: PVI (m^3) x k (kg/m^3). "
+        "Set k with 'Fit k from CSV...' (any ground-truth unit) or use a "
+        "published value: wheat ~0.25-0.30, barley ~0.20-0.30, fodder "
+        "grass ~0.08-0.15 (fresh weight). With k=1.0 equals biomass_pvi."),
+    ("biomass_kg_ha", "Volume", "Calibrated biomass density (kg/ha)",
+        "k x cover_frac x h_p95 x 10000: the same calibration expressed as "
+        "an area density, directly comparable with kg/ha ground truth and "
+        "with other trials regardless of plot size."),
     # ---- Geometric ----
     ("canopy_extent","Shape", "Canopy extent (XY width × length)",
         "Bounding-box of canopy points within the plot polygon."),
@@ -103,21 +107,29 @@ TRAIT_BY_KEY = {t[0]: t for t in TRAITS_CATALOG}
 
 def fit_biomass_k(metrics_csv: str, ground_truth_csv: str,
                   join_col: str = "Plot_ID",
-                  gt_col: str = "biomass_kg") -> dict:
+                  gt_col: str | None = None,
+                  gt_unit: str = "auto") -> dict:
     """Fit the biomass calibration coefficient k from a ground-truth CSV.
 
-    The model is `biomass_kg = k * biomass_pvi` with intercept fixed at 0
-    (zero PVI should give zero biomass). k is the least-squares estimator:
-        k = sum(gt * pvi) / sum(pvi ** 2)
+    Model (area-free):
+        biomass density (kg/m^2) = k * cover_frac * h_p95
+                                 = k * biomass_pvi / region_area_m2
+    with the intercept fixed at 0 (zero canopy -> zero biomass). k is in
+    kg per m^3 of canopy and no longer depends on plot size, so a k fitted
+    on one trial can be applied to another with different plots.
 
-    `metrics_csv`         : output of extract_all_plots; must contain
-                            'biomass_pvi' and `join_col`.
-    `ground_truth_csv`    : user-supplied CSV with `join_col` and `gt_col`
-                            (defaults: 'Plot_ID', 'biomass_kg').
+    `gt_col`  : ground-truth column; None = first column whose name starts
+                with biomass / fresh / dm / yield (e.g. biomass_kg_ha).
+    `gt_unit` : 'auto' (infer from the column name: *_kg_ha, *_t_ha, *_g_m2,
+                *_kg_m2, *_kg = kg per plot) or an explicit unit key from
+                phenoapp.core.units.BIOMASS_UNITS.
 
-    Returns dict with k, R^2, n, rmse, residuals_summary.
+    Returns dict with k, r2, rmse_kg_ha, loocv_rmse_kg_ha, n, unit, gt_col,
+    depth_range (m), gt_range_kg_ha.
     """
     import pandas as pd
+    from .units import (find_ground_truth_column, resolve_unit, to_kg_m2,
+                        kg_m2_to_kg_ha, UNIT_LABELS)
     m  = pd.read_csv(metrics_csv)
     gt = pd.read_csv(ground_truth_csv)
 
@@ -125,70 +137,94 @@ def fit_biomass_k(metrics_csv: str, ground_truth_csv: str,
         raise RuntimeError(
             f"'biomass_pvi' column missing from {metrics_csv}. "
             "Tick biomass_pvi in the Traits tab and recompute first.")
-    for col in (join_col, gt_col):
-        if col not in gt.columns:
-            raise RuntimeError(
-                f"Ground-truth CSV is missing the '{col}' column. "
-                f"Required columns: '{join_col}' and '{gt_col}'.")
+    if "region_area_m2" not in m.columns:
+        raise RuntimeError(
+            "The metrics CSV has no 'region_area_m2' column. Recompute "
+            "traits with this version of PhenoApp so k can be fitted per m².")
+    if join_col not in gt.columns:
+        raise RuntimeError(
+            f"Ground-truth CSV is missing the '{join_col}' column. "
+            f"Required: '{join_col}' plus a biomass column such as "
+            "'biomass_kg_ha' or 'biomass_kg'.")
+    gt_col = find_ground_truth_column(gt.columns, gt_col)
+    unit_key = resolve_unit(gt_unit, gt_col)
 
-    df = m[[join_col, "biomass_pvi"]].merge(gt[[join_col, gt_col]], on=join_col, how="inner")
-    df = df.dropna(subset=["biomass_pvi", gt_col])
+    gt = gt[[join_col, gt_col]].copy()
+    gt[gt_col] = pd.to_numeric(gt[gt_col], errors="coerce")
+    df = m[[join_col, "biomass_pvi", "region_area_m2"]].merge(gt, on=join_col, how="inner")
+    df = df.dropna(subset=["biomass_pvi", "region_area_m2", gt_col])
+    df = df[df["region_area_m2"] > 0]
     if len(df) < 3:
         raise RuntimeError(
             f"Only {len(df)} plot(s) matched between metrics and ground truth. "
             f"Need at least 3 for a meaningful fit.")
 
-    pvi = df["biomass_pvi"].to_numpy(dtype=float)
-    gtv = df[gt_col].to_numpy(dtype=float)
-    denom = float((pvi * pvi).sum())
+    area  = df["region_area_m2"].to_numpy(dtype=float)
+    depth = df["biomass_pvi"].to_numpy(dtype=float) / area      # m^3/m^2 = m
+    gtv   = to_kg_m2(df[gt_col].to_numpy(dtype=float), unit_key, area)
+    ok = np.isfinite(depth) & np.isfinite(gtv)
+    depth, gtv = depth[ok], gtv[ok]
+    denom = float((depth * depth).sum())
     if denom <= 0:
-        raise RuntimeError("All biomass_pvi values are zero - cannot fit.")
-    k = float((gtv * pvi).sum() / denom)
+        raise RuntimeError("All canopy depths are zero - cannot fit.")
+    k = float((gtv * depth).sum() / denom)
 
-    pred = k * pvi
+    pred = k * depth
     ss_res = float(((gtv - pred) ** 2).sum())
     ss_tot = float(((gtv - gtv.mean()) ** 2).sum())
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-    rmse = float(np.sqrt(ss_res / len(df)))
+    rmse = float(np.sqrt(ss_res / len(gtv)))
+    # leave-one-out for a through-origin line: hat h_i = x_i^2 / sum x^2
+    h = depth * depth / denom
+    loo = float(np.sqrt(np.mean(((gtv - pred) / (1.0 - h)) ** 2))) if np.all(h < 1) else float("nan")
 
     return {
         "k":    k,
         "r2":   r2,
-        "rmse": rmse,
-        "n":    int(len(df)),
-        "pvi_range": (float(pvi.min()), float(pvi.max())),
-        "gt_range":  (float(gtv.min()), float(gtv.max())),
+        "rmse_kg_ha":       float(kg_m2_to_kg_ha(rmse)),
+        "loocv_rmse_kg_ha": float(kg_m2_to_kg_ha(loo)),
+        "rmse": rmse,                      # kg/m^2 (kept for callers)
+        "n":    int(len(gtv)),
+        "unit": unit_key,
+        "unit_label": UNIT_LABELS[unit_key],
+        "gt_col": gt_col,
+        "depth_range": (float(depth.min()), float(depth.max())),
+        "gt_range_kg_ha": (float(kg_m2_to_kg_ha(gtv.min())), float(kg_m2_to_kg_ha(gtv.max()))),
+        "area_range_m2": (float(area.min()), float(area.max())),
     }
 
 
 # Default LiDAR predictors for the multi-metric biomass model. These are the
 # metrics most consistently linked to crop biomass in UAV-LiDAR studies:
-# a robust height, canopy cover, and a 3-D occupancy volume.
+# a robust height, canopy cover, and a 3-D occupancy volume. Per-plot
+# volumes are divided by region_area_m2 before fitting (see units.py) so the
+# model predicts a density (kg/ha) and is independent of plot size.
 BIOMASS_MODEL_PREDICTORS = ["h_p95", "cover_frac", "vol_voxel"]
 
 
 def fit_biomass_multi(metrics_csv: str, ground_truth_csv: str,
                       predictors: list[str] | None = None,
                       join_col: str = "Plot_ID",
-                      gt_col: str = "biomass_kg") -> dict:
+                      gt_col: str | None = None,
+                      gt_unit: str = "auto") -> dict:
     """Fit a multiple-linear-regression biomass model from ground truth.
 
-    Model:  biomass_kg = b0 + b1*p1 + b2*p2 + ... + bk*pk
+    Model:  biomass_kg_ha = b0 + b1*p1 + b2*p2 + ... + bk*pk
     where p1..pk are LiDAR-derived plot metrics (default: h_p95, cover_frac,
-    vol_voxel). This is the standard UAV-LiDAR biomass approach and typically
-    beats the single-coefficient PVI model, because height, cover and volume
-    each carry independent information about standing biomass.
+    vol_voxel). Any predictor that scales with plot size (vol_*, surf_area,
+    biomass_pvi, n_points) is divided by region_area_m2 first, so every
+    term is a density and the coefficients transfer between trials.
 
-    Coefficients are solved by ordinary least squares (numpy.linalg.lstsq).
+    Ground truth may be in any unit (see fit_biomass_k for `gt_col` and
+    `gt_unit`); it is converted to kg/ha before fitting.
 
-    `metrics_csv`      : output of extract_all_plots; must contain `join_col`
-                         and every column named in `predictors`.
-    `ground_truth_csv` : user CSV with `join_col` and `gt_col` (measured kg).
-
-    Returns dict: {predictors, intercept, coefs (dict name->coef), r2, adj_r2,
-                   rmse, n, equation}.
+    Returns dict: {predictors, area_normalised, intercept, coefs, r2, adj_r2,
+                   rmse, loocv_rmse, loocv_r2, n, equation, target_unit,
+                   gt_unit, gt_col}. RMSE values are in kg/ha.
     """
     import pandas as pd
+    from .units import (find_ground_truth_column, resolve_unit, to_kg_m2,
+                        kg_m2_to_kg_ha, area_normalise)
 
     predictors = list(predictors or BIOMASS_MODEL_PREDICTORS)
     m  = pd.read_csv(metrics_csv)
@@ -200,15 +236,24 @@ def fit_biomass_multi(metrics_csv: str, ground_truth_csv: str,
             "These predictor column(s) are missing from the metrics CSV: "
             f"{', '.join(missing)}.\nTick them in the Traits tab and recompute, "
             "or choose a different predictor set.")
-    for col in (join_col, gt_col):
-        if col not in gt.columns:
-            raise RuntimeError(
-                f"Ground-truth CSV is missing the '{col}' column. "
-                f"Required columns: '{join_col}' and '{gt_col}'.")
+    if "region_area_m2" not in m.columns:
+        raise RuntimeError(
+            "The metrics CSV has no 'region_area_m2' column. Recompute "
+            "traits with this version of PhenoApp.")
+    if join_col not in gt.columns:
+        raise RuntimeError(
+            f"Ground-truth CSV is missing the '{join_col}' column. "
+            f"Required: '{join_col}' plus a biomass column such as "
+            "'biomass_kg_ha' or 'biomass_kg'.")
+    gt_col = find_ground_truth_column(gt.columns, gt_col)
+    unit_key = resolve_unit(gt_unit, gt_col)
 
-    df = m[[join_col] + predictors].merge(
-        gt[[join_col, gt_col]], on=join_col, how="inner")
-    df = df.dropna(subset=predictors + [gt_col])
+    m, normed = area_normalise(m, predictors)
+    gt = gt[[join_col, gt_col]].copy()
+    gt[gt_col] = pd.to_numeric(gt[gt_col], errors="coerce")
+    df = m[[join_col, "region_area_m2"] + predictors].merge(gt, on=join_col, how="inner")
+    df = df.dropna(subset=predictors + [gt_col, "region_area_m2"])
+    df = df[df["region_area_m2"] > 0]
     n = len(df)
     if n < len(predictors) + 2:
         raise RuntimeError(
@@ -216,59 +261,90 @@ def fit_biomass_multi(metrics_csv: str, ground_truth_csv: str,
             f"{len(predictors) + 2} for a {len(predictors)}-predictor model.")
 
     X = df[predictors].to_numpy(dtype=float)
-    y = df[gt_col].to_numpy(dtype=float)
-    # design matrix with an intercept column
+    y = kg_m2_to_kg_ha(to_kg_m2(df[gt_col].to_numpy(dtype=float), unit_key,
+                                df["region_area_m2"].to_numpy(dtype=float)))
     A = np.column_stack([np.ones(n), X])
     beta, *_ = np.linalg.lstsq(A, y, rcond=None)
 
     pred = A @ beta
-    ss_res = float(((y - pred) ** 2).sum())
+    resid = y - pred
+    ss_res = float((resid ** 2).sum())
     ss_tot = float(((y - y.mean()) ** 2).sum())
     r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
     p = len(predictors)
     adj_r2 = (1.0 - (1.0 - r2) * (n - 1) / (n - p - 1)
               if n - p - 1 > 0 else r2)
     rmse = float(np.sqrt(ss_res / n))
+    # leave-one-out via the hat matrix diagonal
+    try:
+        H = np.einsum("ij,jk,ik->i", A, np.linalg.pinv(A.T @ A), A)
+        loo_res = resid / (1.0 - H)
+        loocv_rmse = float(np.sqrt(np.mean(loo_res ** 2)))
+        loocv_r2 = 1.0 - float((loo_res ** 2).sum()) / ss_tot if ss_tot > 0 else 0.0
+    except Exception:
+        loocv_rmse, loocv_r2 = float("nan"), float("nan")
 
     intercept = float(beta[0])
     coefs = {name: float(c) for name, c in zip(predictors, beta[1:])}
-    eq = "biomass_kg = {:.4g}".format(intercept)
+    def _nm(name): return f"{name}/m^2" if name in normed else name
+    eq = "biomass_kg_ha = {:.4g}".format(intercept)
     for name, c in coefs.items():
-        eq += " {} {:.4g}*{}".format("+" if c >= 0 else "-", abs(c), name)
+        eq += " {} {:.4g}*{}".format("+" if c >= 0 else "-", abs(c), _nm(name))
 
     return {
-        "predictors": predictors,
+        "predictors":      predictors,
+        "area_normalised": normed,
         "intercept":  intercept,
         "coefs":      coefs,
         "r2":         r2,
         "adj_r2":     adj_r2,
         "rmse":       rmse,
+        "loocv_rmse": loocv_rmse,
+        "loocv_r2":   loocv_r2,
         "n":          int(n),
         "equation":   eq,
+        "target_unit": "kg/ha",
+        "gt_unit":    unit_key,
+        "gt_col":     gt_col,
     }
 
 
 def apply_biomass_multi(metrics_csv: str, model: dict,
-                        out_col: str = "biomass_pred_kg") -> int:
+                        out_col: str = "biomass_pred_kg_ha") -> int:
     """Apply a fitted multi-metric model to a metrics CSV, writing predictions.
 
-    Adds/overwrites `out_col` = intercept + Σ coef_i * predictor_i for every row
-    and saves the CSV in place. Returns the number of rows predicted. Rows
-    missing any predictor get NaN.
+    Writes `out_col` (kg/ha) and, when region_area_m2 is present, the
+    per-plot total 'biomass_pred_kg' = kg/ha x area / 10000, then saves the
+    CSV in place. Returns the number of rows predicted. Rows missing any
+    predictor get NaN.
     """
     import pandas as pd
+    from .units import area_normalise
     df = pd.read_csv(metrics_csv)
     preds = model["predictors"]
     missing = [p for p in preds if p not in df.columns]
     if missing:
         raise RuntimeError(
             f"Metrics CSV no longer has predictor column(s): {', '.join(missing)}.")
+    normed = model.get("area_normalised")
+    if normed is None:                      # legacy model: fitted per plot
+        feats = df
+    else:
+        feats, _ = area_normalise(df, preds)
     val = np.full(len(df), model["intercept"], dtype=float)
     for name in preds:
-        val = val + model["coefs"][name] * df[name].to_numpy(dtype=float)
-    df[out_col] = val
+        val = val + model["coefs"][name] * feats[name].to_numpy(dtype=float)
+    if model.get("target_unit", "kg") == "kg/ha":
+        df[out_col] = val
+        if "region_area_m2" in df.columns:
+            df["biomass_pred_kg"] = val * df["region_area_m2"].to_numpy(dtype=float) / 10_000.0
+    else:                                   # legacy per-plot model
+        df["biomass_pred_kg"] = val
+        if "region_area_m2" in df.columns:
+            with np.errstate(divide="ignore", invalid="ignore"):
+                df[out_col] = val / df["region_area_m2"].to_numpy(dtype=float) * 10_000.0
     df.to_csv(metrics_csv, index=False)
-    return int(df[out_col].notna().sum())
+    return int(np.isfinite(val).sum())
 
 
 # ============================================================
@@ -369,7 +445,7 @@ def compute_plot_traits(
         out["vol_alpha"] = _alpha_shape_volume(x, y, z_use)
     if want("surf_area"):
         out["surf_area"] = _surface_area(x, y, z_use)
-    if want("biomass_pvi") or want("biomass_kg"):
+    if want("biomass_pvi") or want("biomass_kg") or want("biomass_kg_ha"):
         h_p95_local = float(np.quantile(z_use, 0.95))
         cover = float(canopy_mask.mean())
         pvi = cover * h_p95_local * plot_area
@@ -377,6 +453,9 @@ def compute_plot_traits(
             out["biomass_pvi"] = pvi
         if want("biomass_kg"):
             out["biomass_kg"] = pvi * float(biomass_k)
+        if want("biomass_kg_ha"):
+            # k (kg/m^3) x canopy depth (m) = kg/m^2  ->  x 10000 = kg/ha
+            out["biomass_kg_ha"] = float(biomass_k) * cover * h_p95_local * 10_000.0
 
     # ---- Geometric ----
     if want("canopy_extent"):
