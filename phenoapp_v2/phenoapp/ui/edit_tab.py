@@ -7,7 +7,7 @@ rotate, scale, undo, save.
 
 from __future__ import annotations
 import os
-from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal
+from PyQt5.QtCore import Qt, QPointF, QRectF, pyqtSignal, QThread
 from PyQt5.QtGui import QPen, QBrush, QColor, QKeySequence, QPolygonF
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QToolBar,
@@ -184,6 +184,42 @@ class EditView(CanopyView):
         return None
 
 
+class _RefineWorker(QThread):
+    progress = pyqtSignal(int, str)
+    done_ok  = pyqtSignal(dict)
+    error    = pyqtSignal(str)
+
+    def __init__(self, kw):
+        super().__init__(); self._kw = kw
+
+    def run(self):
+        try:
+            kw = self._kw
+            from phenoapp.core.grid_refine import refine_grid_to_canopy, render_refine_qa
+            chm = kw["chm"]
+            if not os.path.exists(chm):
+                from phenoapp.core import LASManager
+                from phenoapp.core.surface_models import build_surface_models
+                mgr = LASManager(kw["las_path"], kw["work_crs"], kw["use_smrf"])
+                self.progress.emit(2, "Loading LAS to build the CHM...")
+                mgr.load(progress_cb=lambda p, m: self.progress.emit(int(2 + p * 0.3), m))
+                base = os.path.splitext(os.path.basename(kw["las_path"]))[0]
+                res = build_surface_models(mgr.x, mgr.y, mgr.z, kw["gdf"], os.path.dirname(chm), base, kw["work_crs"],
+                                           hag=mgr.hag, dsm_res=0.10, dtm_mode="exterior",
+                                           progress_cb=lambda p, m: self.progress.emit(int(35 + p * 0.3), m))
+                chm = res["paths"]["chm"]
+            gdf, rep, diag = refine_grid_to_canopy(chm, kw["gdf"], progress_cb=lambda p, m: self.progress.emit(int(65 + p * 0.3), m))
+            save_grid(gdf, kw["out_shp"])
+            stem = os.path.splitext(kw["out_shp"])[0]
+            rep.round(3).to_csv(stem + "_report.csv", index=False)
+            qa = render_refine_qa(chm, kw["gdf"], gdf, rep, stem + "_qa.png")
+            self.progress.emit(100, "done")
+            self.done_ok.emit(dict(gdf=gdf, diag=diag, out_shp=kw["out_shp"], report_csv=stem + "_report.csv", qa_png=qa))
+        except Exception as e:
+            import traceback
+            self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+
 class EditTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -228,6 +264,7 @@ class EditTab(QWidget):
         tb.addAction("L -25cm", lambda: self.resize_sel(0, -0.25))
         tb.addSeparator()
         tb.addAction("⟲ Auto-align to canopy", self.auto_align)
+        tb.addAction("✚ Refine plots to crop (CHM)", self.refine_to_crop)
         tb.addAction("Undo (Z)",  self.undo)
         tb.addAction("Reset",     self.reset)
         tb.addSeparator()
@@ -492,6 +529,58 @@ class EditTab(QWidget):
         self.lbl_status.setText(
             f"Auto-align shift: dx={dx:+.3f} m  dy={dy:+.3f} m "
             f"(use Undo to revert)")
+
+    def refine_to_crop(self):
+        """Per-plot correction from the canopy height model: re-centre each
+        plot along the sowing direction on the crop actually present, set its
+        length from the crop edges, and apply a per-range across-row shift when
+        the furrows are visible. Builds the CHM first if none exists."""
+        s = state()
+        if not s.las_path or not os.path.exists(s.las_path):
+            QMessageBox.warning(self, "No LAS", "Load a project first (the CHM is built from the point cloud).")
+            return
+        plots = self._all_plots()
+        if not plots or self._grid_attrs is None:
+            QMessageBox.warning(self, "No grid", "Click 'Reload from Project' first to load plots.")
+            return
+        s.derive_default_paths()
+        base = os.path.splitext(os.path.basename(s.las_path))[0]
+        chm = os.path.join(os.path.dirname(s.out_csv), "surface_models", f"{base}_CHM.tif")
+        polys = [it.shapely() for it in sorted(plots, key=lambda x: x.plot_idx)]
+        gdf = gpd.GeoDataFrame(self._grid_attrs.copy(), geometry=polys, crs=self._grid_crs)
+        out_shp = (s.saved_grid or s.grid_path or os.path.join(os.path.dirname(s.las_path), "aligned_grid.shp"))
+        out_shp = os.path.splitext(out_shp)[0].replace("_refit", "") + "_refit.shp"
+        self.lbl_status.setText("Refining plots to the crop... (building the CHM first if needed)")
+        self._refine_worker = _RefineWorker(dict(las_path=s.las_path, work_crs=s.work_crs, use_smrf=s.use_smrf,
+                                                 chm=chm, gdf=gdf, out_shp=out_shp))
+        self._refine_worker.done_ok.connect(self._on_refined)
+        self._refine_worker.error.connect(lambda e: QMessageBox.critical(self, "Refine failed", e))
+        self._refine_worker.progress.connect(lambda p, m: self.lbl_status.setText(f"[{p}%] {m}"))
+        self._refine_worker.start()
+
+    def _on_refined(self, res):
+        s = state()
+        new = res["gdf"]; d = res["diag"]
+        self.push_undo()
+        plots = sorted(self._all_plots(), key=lambda x: x.plot_idx)
+        for it, geom in zip(plots, new.geometry):
+            it.setPolygon(shp_to_qpoly(geom))
+        for col in ("plot_len", "along_off", "across_off", "crop_len", "refine_ok"):
+            if col in new.columns:
+                self._grid_attrs[col] = list(new[col].values)
+        s.saved_grid = res["out_shp"]
+        self.lbl_status.setText(f"Refined grid saved → {res['out_shp']} (Undo reverts the view; the file stays)")
+        across = ", ".join(f"{k}: {v:+.2f} m" for k, v in d["across_off_by_group"].items())
+        along = ", ".join(f"{k}: {v:+.2f} m" for k, v in d["along_off_median_by_group"].items())
+        QMessageBox.information(self, "Plots refined to the crop",
+            f"{d['n_along_ok']} of {d['n']} plots measured reliably (others use their range median).\n\n"
+            f"Crop length median {d['crop_len_median']:.2f} m vs polygon {d['poly_len']:.2f} m -> new length median {d['new_len_median']:.2f} m\n"
+            f"Along-plot offset applied, median by range: {along}\n"
+            f"Across-row shift applied by range (0 = furrows not visible): {across}\n"
+            f"Plot ends sticking into the alley: {d['ends_outside_crop_before']} before -> {d['ends_outside_crop_after']} after\n"
+            f"Mean CHM inside plots: {d['mean_chm_inside_before']:.3f} -> {d['mean_chm_inside_after']:.3f} m\n\n"
+            f"Saved: {res['out_shp']}\nReport: {res['report_csv']}\nQA figure: {res['qa_png']}\n\n"
+            "The Traits tab now uses the refined grid.")
 
     def save_grid(self):
         if self._grid_attrs is None or not self._all_plots():

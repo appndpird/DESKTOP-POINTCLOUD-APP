@@ -13,6 +13,7 @@ from .units         import (BIOMASS_UNITS, UNIT_KEYS, UNIT_LABELS, AUTO_LABEL,
                             infer_unit_from_column, area_normalise)
 from .surface_models import (build_surface_models, zonal_chm_stats,
                              annotate_plot_map)
+from .grid_refine   import refine_grid_to_canopy, render_refine_qa
 from .extract       import extract_all_plots
 from .auto_align    import auto_align_grid
 from .regions       import plot_region
