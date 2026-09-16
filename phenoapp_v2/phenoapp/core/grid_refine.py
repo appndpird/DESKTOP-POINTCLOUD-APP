@@ -34,14 +34,29 @@ import numpy as np
 
 
 # ----------------------------------------------------------------------
-def _frame(geom):
+def _frame(geom, ref_u=None):
+    """Centre, long-axis unit vector, short-axis unit vector, half-length, half-width.
+    `ref_u` fixes the sign of the long axis so every plot shares one direction
+    (a rectangle's vertex order is arbitrary, so without it offsets of
+    neighbouring plots can have opposite signs)."""
     xs, ys = np.asarray(geom.minimum_rotated_rectangle.exterior.coords)[:-1].T
     c = np.array([xs.mean(), ys.mean()])
     e1 = np.array([xs[1] - xs[0], ys[1] - ys[0]]); e2 = np.array([xs[2] - xs[1], ys[2] - ys[1]])
     L1, L2 = np.linalg.norm(e1), np.linalg.norm(e2)
     a_u, hl, hw = (e1 / L1, L1 / 2, L2 / 2) if L1 >= L2 else (e2 / L2, L2 / 2, L1 / 2)
+    if ref_u is not None and float(a_u @ ref_u) < 0:
+        a_u = -a_u
     a_v = np.array([-a_u[1], a_u[0]])
     return c, a_u, a_v, hl, hw
+
+
+def reference_axis(plots_gdf):
+    """One long-axis direction for the whole grid (from the first plot, oriented
+    towards the north-east half-plane so results are reproducible)."""
+    _, a_u, _, _, _ = _frame(plots_gdf.geometry.iloc[0])
+    if a_u[1] < 0 or (a_u[1] == 0 and a_u[0] < 0):
+        a_u = -a_u
+    return a_u
 
 
 def _half_height_edges(profile, coords, plateau_q=0.9, frac=0.5):
@@ -96,13 +111,14 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
     if group_col is None:
         group_col = next((c for c in ("Range", "Bank", "range", "bank") if c in gdf.columns), None)
     groups = gdf[group_col].astype(str).values if group_col else np.array(["all"] * len(gdf))
-    _, _, _, hl0, hw0 = _frame(gdf.geometry.iloc[0])
+    ref_u = reference_axis(gdf)
+    _, _, _, hl0, hw0 = _frame(gdf.geometry.iloc[0], ref_u)
     pitch = _estimate_pitch(gdf, hw0)
 
     rows, frames, prof_v_by_group = [], [], {}
     for i, geom in enumerate(gdf.geometry):
         if i % 16 == 0: _p(int(70 * i / len(gdf)), f"measuring plot {i + 1}/{len(gdf)}")
-        c, a_u, a_v, hl, hw = _frame(geom); frames.append((c, a_u, a_v, hl, hw))
+        c, a_u, a_v, hl, hw = _frame(geom, ref_u); frames.append((c, a_u, a_v, hl, hw))
         pad = along_search_m + 0.5
         minx, miny, maxx, maxy = geom.buffer(pad).bounds
         sel = (GX >= minx) & (GX <= maxx) & (GY >= miny) & (GY <= maxy)
@@ -125,9 +141,13 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
 
     # plausibility: crop length within [poly-shrink_max-0.3, poly+extend_max+1.0], offset within search
     ok = (rep.crop_len.between(rep.poly_len - shrink_max_m - 0.3, rep.poly_len + extend_max_m + 1.0)
-          & (rep.along_off.abs() < along_search_m * 0.6))
+          & (rep.along_off.abs() < along_search_m * 0.85))
     rep["along_ok"] = ok
+    # fallback for a failed plot: its group's median offset, but only when most of the
+    # group measured reliably; otherwise leave the plot where it is
+    grp_ok_frac = rep.groupby("group").along_ok.mean()
     grp_med = rep[ok].groupby("group").along_off.median()
+    grp_med = grp_med.where(grp_ok_frac.reindex(grp_med.index) >= 0.5, 0.0)
     rep["along_off_applied"] = np.where(ok, rep.along_off, rep.group.map(grp_med).fillna(0.0))
     rep["new_len"] = np.where(ok, np.clip(rep.crop_len - 2 * margin_m, rep.poly_len - shrink_max_m, rep.poly_len + extend_max_m), rep.poly_len)
 
@@ -170,7 +190,7 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
     ends_out_before = ends_out_after = 0
     after = []
     for i, geom in enumerate(new_geoms):
-        c, a_u, a_v, hl, hw = _frame(geom); r = rep.iloc[i]
+        c, a_u, a_v, hl, hw = _frame(geom, ref_u); r = rep.iloc[i]
         minx, miny, maxx, maxy = geom.buffer(0.3).bounds
         sel = (GX >= minx) & (GX <= maxx) & (GY >= miny) & (GY <= maxy)
         u = (GX[sel] - c[0]) * a_u[0] + (GY[sel] - c[1]) * a_u[1]; v = (GX[sel] - c[0]) * a_v[0] + (GY[sel] - c[1]) * a_v[1]
@@ -183,7 +203,7 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
             ends_out_after += int((nlo < lo - 1e-6) or (nhi > hi + 1e-6))
     rep["mean_inside_after"] = after
     if "Plot_ID" in gdf.columns: rep.insert(0, "Plot_ID", gdf["Plot_ID"].values)
-    diag = dict(n=len(gdf), n_along_ok=int(ok.sum()), pitch_m=pitch,
+    diag = dict(n=len(gdf), n_along_ok=int(ok.sum()), pitch_m=pitch, axis_u=[float(ref_u[0]), float(ref_u[1])],
                 along_off_median_by_group={k: float(v) for k, v in grp_med.items()},
                 across_off_by_group=across_applied, furrow_depth_by_group={k: (float(v) if np.isfinite(v) else None) for k, v in furrow_depth.items()},
                 crop_len_median=float(np.nanmedian(rep.crop_len[ok])) if ok.any() else None,

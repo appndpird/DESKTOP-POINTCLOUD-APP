@@ -420,7 +420,7 @@ MODEL_SUITE = [
 
 def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
                     enabled=None, progress_cb=None, cv: str = "loo",
-                    gt_unit: str = "auto"):
+                    gt_unit: str = "auto", basis: str = "auto"):
     """Fit + cross-validate the whole suite.
 
     df          : merged per-plot DataFrame containing Plot_ID, region_area_m2
@@ -430,6 +430,11 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
     gt_unit     : 'auto' (from the column name: fresh_kg_ha, fresh_t_ha,
                   fresh_g_m2, fresh_kg_m2, fresh_kg = kg per plot) or an
                   explicit key from phenoapp.core.units.BIOMASS_UNITS
+    basis       : 'fresh' (default when a fresh_* column exists), 'dry'
+                  (the ground truth is dry matter: every biomass model in
+                  the suite is fitted to dm_kg_ha and labelled 'Dry biomass';
+                  DM% models and the derived-DM step are skipped), or 'auto'
+                  (dry when only dm_* columns are present)
     spectra     : optional (n, bands) array aligned with spectra_ids
     spectra_ids : Plot_ID list matching spectra rows
     enabled     : optional set of model keys to fit
@@ -486,7 +491,21 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
     if spectra is not None and spectra_ids is not None:
         spec_lookup = {pid: spectra[i] for i, pid in enumerate(spectra_ids)}
 
+    if basis == "auto":
+        basis = "fresh" if "fresh_kg_ha" in gt.columns else ("dry" if "dm_kg_ha" in gt.columns else "fresh")
     todo = [m for m in MODEL_SUITE if (enabled is None or m[0] in enabled)]
+    if basis == "dry":
+        # re-target the fresh-weight models to dry matter; DM% needs fresh weight, so skip it
+        todo = [(k, l.replace("Fresh \u2014 ", "Dry biomass \u2014 ").replace("DM \u2014 ", "Dry biomass \u2014 "),
+                 mod, ("dm_kg_ha" if t == "fresh_kg_ha" else t), p)
+                for (k, l, mod, t, p) in todo if t != "dm_frac"]
+        seen = set(); dedup = []
+        for spec in todo:                       # dm_lidar (h_mean) duplicates fresh_lidar once re-targeted
+            sig = (spec[3], tuple(spec[4]) if isinstance(spec[4], list) else spec[4])
+            if sig in seen:
+                continue
+            seen.add(sig); dedup.append(spec)
+        todo = dedup
     for mi, (key, label, modality, target, predictors) in enumerate(todo):
         if progress_cb:
             progress_cb(int(100 * mi / max(len(todo), 1)), f"Fitting {label}")
@@ -667,12 +686,12 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
             col = pd.Series(vals, index=ok_rows["Plot_ID"])
             pred_df[f"pred_{key}"] = pred_df["Plot_ID"].map(col)
 
-    # ---- derived DM kg = fresh_pred x DM%_pred ----
-    fresh_col = next((f"pred_{k}" for k in
+    # ---- derived DM kg = fresh_pred x DM%_pred (fresh basis only) ----
+    fresh_col = None if basis == "dry" else next((f"pred_{k}" for k in
                       ("fresh_vnir_pls", "fresh_vnir", "fresh_fusion",
                        "fresh_lidar")
                       if f"pred_{k}" in pred_df.columns), None)
-    dm_col = next((f"pred_{k}" for k in ("dmfrac_vnir_pls", "dmfrac_vnir")
+    dm_col = None if basis == "dry" else next((f"pred_{k}" for k in ("dmfrac_vnir_pls", "dmfrac_vnir")
                    if f"pred_{k}" in pred_df.columns), None)
     if fresh_col and dm_col:
         pred_df["pred_dm_kg_ha_derived"] = pred_df[fresh_col] * pred_df[dm_col]
@@ -696,8 +715,9 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
     for key, r in results.items():
         tgt = r.get("target", "")
         unit = "0-1" if tgt == "dm_frac" else ("kg/ha" if tgt.endswith("_kg_ha") else "")
-        r["target_unit"] = unit
+        r["target_unit"] = unit; r["basis"] = basis
         if r.get("model") is not None:
+            r["model"]["basis"] = basis
             r["model"]["target_unit"] = unit
             r["model"]["area_normalised"] = list(_normed)
             r["model"]["gt_units"] = gt_units

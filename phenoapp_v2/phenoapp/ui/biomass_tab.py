@@ -96,16 +96,16 @@ class _FitWorker(QThread):
 
     def __init__(self, metrics_csv, vnir_csv, spectra_npz, gt_csv,
                  out_pred_csv, out_models_json, cv_mode="loo", enabled=None,
-                 gt_unit="auto"):
+                 gt_unit="auto", basis="auto"):
         super().__init__()
         self._a = (metrics_csv, vnir_csv, spectra_npz, gt_csv,
-                   out_pred_csv, out_models_json, cv_mode, enabled, gt_unit)
+                   out_pred_csv, out_models_json, cv_mode, enabled, gt_unit, basis)
 
     def run(self):
         try:
             import pandas as pd
             (metrics_csv, vnir_csv, spectra_npz, gt_csv,
-             out_pred_csv, out_models_json, cv_mode, enabled, gt_unit) = self._a
+             out_pred_csv, out_models_json, cv_mode, enabled, gt_unit, basis) = self._a
 
             df = pd.read_csv(metrics_csv)
             if vnir_csv and os.path.exists(vnir_csv):
@@ -117,18 +117,19 @@ class _FitWorker(QThread):
                 spectra = z["spectra"]; spectra_ids = list(z["plot_ids"])
             gt = pd.read_csv(gt_csv)
             has_fresh = any(c.lower().startswith("fresh") for c in gt.columns)
-            if "Plot_ID" not in gt.columns or not has_fresh:
+            has_dm = any(c.lower().startswith("dm") and c.lower() != "dm_frac" for c in gt.columns)
+            if "Plot_ID" not in gt.columns or not (has_fresh or has_dm):
                 raise RuntimeError(
-                    "Ground-truth CSV must have Plot_ID and a fresh biomass "
-                    "column - fresh_kg_ha, fresh_t_ha, fresh_g_m2, fresh_kg_m2 "
-                    "or fresh_kg (kg per plot) - plus optional dm_frac or "
-                    "dm_<unit>.")
+                    "Ground-truth CSV must have Plot_ID and a biomass column - "
+                    "fresh_kg_ha / fresh_t_ha / fresh_g_m2 / fresh_kg_m2 / fresh_kg "
+                    "(kg per plot) for fresh weight, or dm_kg_ha (etc.) for dry "
+                    "matter - plus optional dm_frac.")
 
             def cb(p, m): self.progress.emit(int(p * 0.95), m)
             results, pred = fit_model_suite(df, gt, spectra, spectra_ids,
                                             enabled=enabled,
                                             progress_cb=cb, cv=cv_mode,
-                                            gt_unit=gt_unit)
+                                            gt_unit=gt_unit, basis=basis)
             pred.to_csv(out_pred_csv, index=False)
             save_models(results, out_models_json)
 
@@ -236,6 +237,18 @@ class BiomassTab(QWidget):
             "LiDAR volumes are divided by plot area, so the models transfer "
             "between trials with different plot sizes.")
         gform.addRow("Ground-truth unit:", self.cb_gt_unit)
+        self.cb_basis = QComboBox()
+        self.cb_basis.addItems(["Auto (fresh if a fresh_* column exists, else dry)",
+                                "Fresh weight (fresh_*; DM% and derived DM also fitted)",
+                                "Dry matter (dm_*: all biomass models target dry matter)"])
+        self.cb_basis.setToolTip(
+            "What the ground-truth weights are.\n\n"
+            "Fresh weight: the standard suite - fresh models, DM% from the 970 nm water "
+            "feature, and derived DM kg.\n"
+            "Dry matter: when the harvest was oven-dried before weighing, every LiDAR / "
+            "VNIR / fusion model is fitted directly to dry matter (kg/ha) and the DM% "
+            "models are skipped.")
+        gform.addRow("Ground-truth basis:", self.cb_basis)
         gform.addRow("Validation:", self.cb_cv)
 
         row3 = QHBoxLayout()
@@ -355,10 +368,11 @@ class BiomassTab(QWidget):
         self.btn_fit.setEnabled(False)
         i = self.cb_gt_unit.currentIndex()
         gt_unit = "auto" if i <= 0 else UNIT_KEYS[i - 1]
+        basis = ("auto", "fresh", "dry")[self.cb_basis.currentIndex()]
         self._wf = _FitWorker(s.out_csv, s.vnir_csv, s.vnir_spectra, gt,
                               base + "_biomass_predictions.csv",
                               base + "_biomass_models.json", cv_mode,
-                              enabled, gt_unit)
+                              enabled, gt_unit, basis)
         self._wf.progress.connect(self._on_prog)
         self._wf.done_ok.connect(self._on_fit_done)
         self._wf.error.connect(self._on_err)
