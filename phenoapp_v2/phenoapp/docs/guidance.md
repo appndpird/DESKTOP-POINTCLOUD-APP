@@ -121,6 +121,38 @@ absolute values.
 
 ---
 
+## Correcting the plot grid to the crop (Edit tab → "Refine plots to crop")
+
+A grid drawn from corners or a trial plan is rarely exactly on the crop: the
+seeder starts and stops differently in each range and drilling direction, so
+plots are individually shifted along the sowing direction and their sown length
+differs from the nominal length. **Auto-align** fixes only a rigid shift of the
+whole grid. **Refine plots to crop** corrects every plot individually from the
+canopy height model (building the CHM first if the project has none):
+
+* **Along the plot** – the CHM is averaged across the plot's inner width and
+  the two positions where it falls to half its plateau (the bare alleys) mark
+  the crop ends. The polygon is re-centred on them and its length set to the
+  crop length minus a 0.20 m margin at each end (never more than ±0.5 m from
+  the original length).
+* **Across rows** – neighbouring plots usually touch at maturity, so there are
+  no edges to find; the furrow minima expected at ±half the plot pitch are
+  located on the range-median profile and applied as one shift per range,
+  only when a plausible furrow pair is visible.
+* **Safeguards** – a plot whose crop edges are implausible keeps its length and
+  takes its range's median offset; the report flags it (`refine_ok = False`).
+
+Outputs next to the grid: `<grid>_refit.shp` (extra columns `plot_len`,
+`along_off`, `across_off`, `crop_len`, `refine_ok`), `<grid>_refit_report.csv`
+and `<grid>_refit_qa.png` (before/after zooms of the largest corrections). The
+Traits tab uses the refined grid from then on. On the 2025 Muresk NUE trial the
+original polygons had one end in the alley on 46 of 128 plots; after refinement
+none did. Plant heights were unchanged (r = 0.999 between grids), the sampled
+area grew 5 % to the true sown core, and the biomass proxies' correlation with
+harvested biomass rose by 0.01 to 0.02 - a small but free gain.
+
+---
+
 ## Surface models: DSM, DTM and CHM for the whole trial
 
 Drone crop height is always a **surface minus a terrain model**. The Traits tab
