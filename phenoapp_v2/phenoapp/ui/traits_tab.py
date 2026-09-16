@@ -88,6 +88,67 @@ class _ExtractWorker(QThread):
             self.error.emit(f"{e}\n\n{traceback.format_exc()}")
 
 
+class _SurfaceWorker(QThread):
+    """Trial-wide DSM / DTM / CHM GeoTIFFs + annotated per-plot height maps."""
+    progress = pyqtSignal(int, str)
+    done_ok  = pyqtSignal(dict)
+    error    = pyqtSignal(str)
+
+    def __init__(self, kwargs):
+        super().__init__()
+        self._kw = kwargs
+
+    def run(self):
+        try:
+            import numpy as np, pandas as pd
+            from phenoapp.core.surface_models import (build_surface_models,
+                                                       zonal_chm_stats, annotate_plot_map)
+            kw = self._kw
+            mgr = LASManager(kw["las_path"], kw["work_crs"], kw["use_smrf"])
+            self.progress.emit(2, "Loading LAS...")
+            mgr.load(progress_cb=lambda p, m: self.progress.emit(int(2 + p * 0.25), m))
+            plots = load_grid(kw["grid_path"], target_crs=kw["work_crs"])
+            base = os.path.splitext(os.path.basename(kw["las_path"]))[0]
+            out_dir = os.path.join(os.path.dirname(kw["out_csv"]), "surface_models")
+            res = build_surface_models(
+                mgr.x, mgr.y, mgr.z, plots, out_dir, base, kw["work_crs"], hag=mgr.hag,
+                dsm_res=kw["dsm_res"], dtm_mode=kw["dtm_mode"], dtm_cell=kw["dtm_cell"],
+                external_dtm=kw.get("external_dtm"),
+                progress_cb=lambda p, m: self.progress.emit(int(30 + p * 0.5), m))
+            self.progress.emit(82, "Zonal statistics from the CHM...")
+            zs = zonal_chm_stats(res["paths"]["chm"], plots)
+            zs.to_csv(os.path.join(out_dir, f"{base}_CHM_zonal_stats.csv"), index=False)
+            # annotation value: the chosen height trait from plot_metrics.csv if present,
+            # otherwise the CHM p99 - both in centimetres
+            label_src = "CHM p99"
+            vals = dict(zip(zs["Plot_ID"], (zs.get("chm_p99", pd.Series(dtype=float)) * 100).round(0)))
+            trait = kw.get("label_trait", "h_p99")
+            if kw["out_csv"] and os.path.exists(kw["out_csv"]):
+                m = pd.read_csv(kw["out_csv"])
+                if trait in m.columns:
+                    vals = dict(zip(m["Plot_ID"], (m[trait] * 100).round(0))); label_src = trait
+            self.progress.emit(90, "Rendering annotated maps...")
+            pngs = {}
+            pngs["chm"] = annotate_plot_map(res["paths"]["chm"], plots, vals,
+                os.path.join(out_dir, f"{base}_CHM_annotated.png"),
+                title=f"Canopy height model - label: {label_src} plant height per plot (cm)",
+                value_label="CHM (m)", cmap="viridis", vmin=0)
+            pngs["dtm"] = annotate_plot_map(res["paths"]["dtm"], plots, vals,
+                os.path.join(out_dir, f"{base}_DTM_annotated.png"),
+                title=f"Digital terrain model ({kw['dtm_mode']}) - label: {label_src} plant height per plot (cm)",
+                value_label="DTM elevation (m)", cmap="terrain")
+            pngs["dsm"] = annotate_plot_map(res["paths"]["dsm"], plots, vals,
+                os.path.join(out_dir, f"{base}_DSM_annotated.png"),
+                title=f"Digital surface model - label: {label_src} plant height per plot (cm)",
+                value_label="DSM elevation (m)", cmap="terrain")
+            self.progress.emit(100, "Surface models written")
+            res["pngs"] = pngs; res["out_dir"] = out_dir; res["label_src"] = label_src
+            self.done_ok.emit(res)
+        except Exception as e:
+            import traceback
+            self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+
 class TraitsTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -247,6 +308,42 @@ class TraitsTab(QWidget):
         model_row.addWidget(self.btn_fit_multi)
         model_row.addStretch()
 
+        # Trial-wide surface models (DSM / DTM / CHM GeoTIFFs + annotated maps)
+        surf_row = QHBoxLayout()
+        self.cb_dtm_mode = QComboBox()
+        self.cb_dtm_mode.addItems([
+            "DTM: exterior ground surface (alleys) - recommended",
+            "DTM: ground inside each plot (raised beds)",
+            "DTM: SMRF height-above-ground (needs SMRF on)",
+            "DTM: external GeoTIFF (early-season flight)...",
+        ])
+        self.cb_dtm_mode.setToolTip(
+            "How the terrain model is built for the whole trial.\n\n"
+            "Exterior: one smooth surface fitted to returns in the alleys around all "
+            "plots - works under a closed canopy.\n"
+            "Inside each plot: the 1st-percentile return of each plot sets its own ground "
+            "('ground inside the zone', for raised beds).\n"
+            "SMRF: uses the PDAL ground classification already loaded.\n"
+            "External: a DTM from another date (e.g. a bare-soil flight); it is checked "
+            "against this flight's alley ground and refused if they disagree by more "
+            "than 15 cm robust SD (poor co-registration).")
+        self.dsb_dsm_res = QDoubleSpinBox()
+        self.dsb_dsm_res.setRange(0.02, 2.0); self.dsb_dsm_res.setDecimals(2)
+        self.dsb_dsm_res.setSingleStep(0.05); self.dsb_dsm_res.setValue(0.10)
+        self.dsb_dsm_res.setSuffix(" m cell"); self.dsb_dsm_res.setToolTip(
+            "DSM / CHM cell size. 0.05-0.10 m suits 1000+ pts/m2 LiDAR.")
+        self.btn_surface = QPushButton("Export DSM / DTM / CHM + annotated map...")
+        self.btn_surface.clicked.connect(self._run_surface)
+        self.btn_surface.setToolTip(
+            "Write trial-wide GeoTIFFs (DSM = max z per cell, DTM from the chosen "
+            "method, CHM = DSM - DTM) into <project>/surface_models/, plus PNG maps "
+            "with every plot outlined and labelled with its plant height (cm). The "
+            "label uses h_p99 from plot_metrics.csv when Compute Traits has run, "
+            "otherwise the CHM p99. Also writes CHM zonal statistics per plot.")
+        surf_row.addWidget(self.cb_dtm_mode, stretch=2)
+        surf_row.addWidget(self.dsb_dsm_res, stretch=1)
+        surf_row.addWidget(self.btn_surface)
+
         self.cb_writelas = QCheckBox("Also write per-plot LAS files")
         self.cb_writelas.setChecked(True)
         f.addRow("Canopy height cutoff:", self.dsb_hcut)
@@ -255,6 +352,7 @@ class TraitsTab(QWidget):
         f.addRow("Sampling region:", region_row)
         f.addRow("Biomass calibration k:", bio_row)
         f.addRow("Multi-metric biomass:", model_row)
+        f.addRow("Surface models:", surf_row)
         f.addRow("", self.cb_writelas)
         v.addWidget(params)
 
@@ -447,6 +545,71 @@ class TraitsTab(QWidget):
         self._w.done_ok.connect(self._on_done)
         self._w.error.connect(self._on_error)
         self._w.start()
+
+    def _run_surface(self):
+        s = state()
+        if not s.las_path or not os.path.exists(s.las_path):
+            QMessageBox.warning(self, "No LAS", "Load a project on the Project tab first.")
+            return
+        grid_path = s.saved_grid if (s.saved_grid and os.path.exists(s.saved_grid)) else s.grid_path
+        if not grid_path or not os.path.exists(grid_path):
+            QMessageBox.warning(self, "No grid",
+                "Save an aligned grid (Edit tab) or load one on the Project tab.")
+            return
+        s.derive_default_paths()
+        mode = ("exterior", "inplot", "hag", "external")[self.cb_dtm_mode.currentIndex()]
+        external = None
+        if mode == "external":
+            external, _ = QFileDialog.getOpenFileName(
+                self, "Pick the external DTM GeoTIFF (e.g. bare-soil flight)",
+                os.path.dirname(s.las_path), "GeoTIFF (*.tif *.tiff);;All files (*)")
+            if not external:
+                return
+        if mode == "hag" and not s.use_smrf:
+            QMessageBox.warning(self, "SMRF is off",
+                "The SMRF DTM needs 'Use proper ground classification (SMRF)' ticked "
+                "on the Project tab. Pick another DTM method or enable SMRF and reload.")
+            return
+        kw = dict(las_path=s.las_path, work_crs=s.work_crs, use_smrf=s.use_smrf,
+                  grid_path=grid_path, out_csv=s.out_csv, dsm_res=self.dsb_dsm_res.value(),
+                  dtm_mode=mode, dtm_cell=1.0, external_dtm=external, label_trait="h_p99")
+        self.btn_surface.setEnabled(False)
+        self.progress.setValue(0); self.log.clear()
+        self._ws = _SurfaceWorker(kw)
+        self._ws.progress.connect(self._on_progress)
+        self._ws.done_ok.connect(self._on_surface_done)
+        self._ws.error.connect(self._on_surface_error)
+        self._ws.start()
+
+    def _on_surface_done(self, res):
+        self.btn_surface.setEnabled(True)
+        d = res.get("dtm", {})
+        extra = ""
+        if d.get("method") == "exterior":
+            extra = (f"Exterior surface terms: {', '.join(d.get('terms', []))}; "
+                     f"RMS on alley cells {d.get('rms_resid_m', float('nan'))*100:.1f} cm; "
+                     f"{d.get('n_ground_cells')} ground cells.\n")
+        elif d.get("method") == "external":
+            extra = (f"External DTM offset vs this flight's alleys: {d.get('offset_vs_alleys_m', 0):+.3f} m "
+                     f"(robust SD {d.get('robust_sd_m', 0):.3f} m); shift applied {d.get('shift_applied_m', 0):+.3f} m.\n")
+        QMessageBox.information(self, "Surface models written",
+            f"Folder: {res['out_dir']}\n\n"
+            f"DSM: {os.path.basename(res['paths']['dsm'])}\n"
+            f"DTM: {os.path.basename(res['paths']['dtm'])}\n"
+            f"CHM: {os.path.basename(res['paths']['chm'])}\n"
+            f"Cell {res['res']} m, {res['nx']} x {res['ny']} cells; "
+            f"{res['dsm_cells_with_returns']*100:.1f}% of cells have returns; "
+            f"{res['chm_negative_frac']*100:.1f}% of cells were below the DTM by >5 cm (clipped to 0).\n"
+            + extra +
+            f"\nAnnotated maps (label = {res.get('label_src')} in cm):\n"
+            f"  {os.path.basename(res['pngs']['chm'])}\n"
+            f"  {os.path.basename(res['pngs']['dtm'])}\n"
+            f"  {os.path.basename(res['pngs']['dsm'])}\n"
+            "CHM zonal statistics per plot are in the *_CHM_zonal_stats.csv next to them.")
+
+    def _on_surface_error(self, err):
+        self.btn_surface.setEnabled(True)
+        QMessageBox.critical(self, "Surface models failed", err)
 
     def _on_progress(self, p, msg):
         self.progress.setValue(p)

@@ -121,6 +121,53 @@ absolute values.
 
 ---
 
+## Surface models: DSM, DTM and CHM for the whole trial
+
+Drone crop height is always a **surface minus a terrain model**. The Traits tab
+can write the three classic rasters for the whole trial, on one grid, plus maps
+with every plot labelled with its plant height:
+
+| Product | What it is | How it is made |
+|---|---|---|
+| **DSM** (digital surface model) | Everything the laser hit: crop, soil, tracks | Maximum z per cell (default 0.10 m) |
+| **DTM** (digital terrain model) | Bare ground only | One of the four methods below, evaluated on the DSM grid |
+| **CHM** (canopy height model) | Crop height above ground | DSM − DTM, negatives clipped to 0 |
+| **Annotated maps** (PNG) | CHM / DTM / DSM with plot outlines and a number per plot | Label = `h_p99` from `plot_metrics.csv` (cm) if Compute Traits has run, else CHM p99 |
+
+Why one raster set for the trial and not one per plot: the ground is only
+observable *outside* the plots (alleys, tracks), so a terrain model built inside
+a plot polygon rides on the canopy bottom and compresses the height. One smooth
+surface constrained by every alley is far better determined than 128 little
+ones, it is what every photogrammetry pipeline does, and a saved DTM from one
+date can be reused on the next.
+
+**DTM methods** (drop-down next to the *Export* button):
+
+1. **Exterior ground surface** (default) — a low-order surface fitted to the
+   lowest returns in the alleys around all plots. Works under a closed canopy.
+2. **Ground inside each plot** — each plot's 1st-percentile return becomes its
+   ground ("ground inside the zone"); use for raised beds / vegetables.
+3. **SMRF height-above-ground** — the PDAL ground classification loaded on the
+   Project tab, gridded as the median of z − HAG.
+4. **External GeoTIFF** — a DTM from another date (e.g. a bare-soil or seedling
+   flight). It is resampled onto the DSM grid and **checked against this
+   flight's alley ground**: the median offset is removed, and if the two
+   disagree by more than 15 cm robust SD the export refuses, because the flights
+   are not co-registered well enough (RTK on both dates or shared GCPs are
+   required for this method).
+
+Outputs go to `<project>/surface_models/` as `<las name>_DSM.tif`, `_DTM.tif`,
+`_CHM.tif`, three `_annotated.png` maps and `_CHM_zonal_stats.csv` (per-plot
+max, p99, p95, mean and cover fraction read from the CHM).
+
+> **CHM statistics read higher than point statistics.** A CHM cell holds the
+> highest of ~50 returns, so the p99 of CHM cells sits several centimetres above
+> the p99 of the points themselves (about +19 cm on a 4500 pts/m² wheat cloud at
+> 0.10 m cells). Use the point-based traits (`h_p95`, `h_p99`) for calibration
+> against ruler heights, and the rasters for mapping, QGIS and reuse.
+
+---
+
 ## Estimating biomass from LiDAR
 
 The point cloud gives you **proxies** (PVI, voxel volume, height, cover); turning
