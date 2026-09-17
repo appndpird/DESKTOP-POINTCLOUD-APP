@@ -46,15 +46,15 @@ class _VNIRWorker(QThread):
     error    = pyqtSignal(str)
 
     def __init__(self, vnir_path, grid_path, work_crs,
-                 region_mode, band_width, out_csv, out_npz):
+                 region_mode, band_width, out_csv, out_npz, cubes_dir=None):
         super().__init__()
         self._a = (vnir_path, grid_path, work_crs, region_mode,
-                   band_width, out_csv, out_npz)
+                   band_width, out_csv, out_npz, cubes_dir)
 
     def run(self):
         try:
             (vnir_path, grid_path, work_crs, region_mode,
-             band_width, out_csv, out_npz) = self._a
+             band_width, out_csv, out_npz, cubes_dir) = self._a
             self.progress.emit(2, "Opening VNIR cube...")
             cube = VNIRCube(vnir_path)
             plots = load_grid(grid_path, target_crs=work_crs)
@@ -69,15 +69,24 @@ class _VNIRWorker(QThread):
             df = cube.plot_table(plots, regions, progress_cb=cb1)
             df.to_csv(out_csv, index=False)
 
-            def cb2(p, m): self.progress.emit(30 + int(p * 0.68), m)
+            span = 0.68 if not cubes_dir else 0.38
+            def cb2(p, m): self.progress.emit(30 + int(p * span), m)
             spectra, npx = cube.plot_spectra(plots, regions, progress_cb=cb2)
             np.savez_compressed(out_npz, spectra=spectra,
                                 plot_ids=np.asarray(df["Plot_ID"]),
                                 wavelengths=cube.wavelengths, n_px=npx)
+            n_cubes = 0
+            if cubes_dir:
+                def cb3(p, m): self.progress.emit(68 + int(p * 0.30), m)
+                idx = cube.write_plot_cubes(plots, cubes_dir, progress_cb=cb3)
+                n_cubes = len(idx)
             cube.close()
 
             low = df[df["vnir_coverage"] < 0.5]["Plot_ID"].tolist()
             msg = f"VNIR table: {out_csv}\nSpectra: {out_npz}"
+            if cubes_dir:
+                msg += (f"\nPer-plot VNIR cubes: {n_cubes} GeoTIFFs (all bands, clipped to "
+                        f"the full plot polygon) -> {cubes_dir}")
             if low:
                 msg += (f"\nWARNING: plots {low} have <50% valid VNIR pixels "
                         "(cube cropped or striped there) - treat their "
@@ -173,12 +182,20 @@ class BiomassTab(QWidget):
         row.addWidget(self.ed_vnir); row.addWidget(b)
         fform.addRow("VNIR cube:", row)
         self.btn_vnir = QPushButton("Compute VNIR indices + spectra per plot")
+        self.cb_vnir_cubes = QCheckBox("Also write per-plot VNIR cubes (GeoTIFF, all bands)")
+        self.cb_vnir_cubes.setChecked(False)
+        self.cb_vnir_cubes.setToolTip(
+            "Like the per-plot LAS files on the Traits tab, but for the hyperspectral cube: one "
+            "GeoTIFF per plot with every band, clipped to the full plot polygon (0 outside), "
+            "wavelengths as band descriptions. Written to <project>/plots_vnir/. Files are large "
+            "(tens of MB per plot at 1.5 cm pixels) - tick only when building a dataset.")
         self.btn_vnir.clicked.connect(self._run_vnir)
         self.btn_vnir.setToolTip(
             "Computes NDVI, NDRE (fresh-biomass index), WBI/NDWI970 "
             "(moisture) and the full mean spectrum per plot, over the same "
             "sampling region as the LiDAR traits (Traits tab setting).")
         fform.addRow("", self.btn_vnir)
+        fform.addRow("", self.cb_vnir_cubes)
         v.addWidget(vbox)
 
         # ---- Ground truth + fitting ----
@@ -334,9 +351,11 @@ class BiomassTab(QWidget):
         s.vnir_path = vnir
         s.derive_default_paths()
         self.btn_vnir.setEnabled(False)
+        cubes_dir = (os.path.join(os.path.dirname(s.out_csv or s.las_path), "plots_vnir")
+                     if self.cb_vnir_cubes.isChecked() else None)
         self._wv = _VNIRWorker(vnir, grid_path, s.work_crs,
                                s.region_mode, s.band_width,
-                               s.vnir_csv, s.vnir_spectra)
+                               s.vnir_csv, s.vnir_spectra, cubes_dir)
         self._wv.progress.connect(self._on_prog)
         self._wv.done_ok.connect(self._on_vnir_done)
         self._wv.error.connect(self._on_err)
