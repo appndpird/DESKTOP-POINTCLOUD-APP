@@ -141,6 +141,19 @@ canopy height model (building the CHM first if the project has none):
   only when a plausible furrow pair is visible.
 * **Safeguards** – a plot whose crop edges are implausible keeps its length and
   takes its range's median offset; the report flags it (`refine_ok = False`).
+* **Raster source** – the LiDAR CHM by default; if the project has an RGB
+  orthomosaic you can choose it instead. A crop/soil index is built from the
+  ortho (excess-green, or excess-blue for false-colour composites where the crop
+  renders blue – the polarity is picked automatically from plot-vs-alley
+  contrast) and saved as `grid_refine_veg_index.tif`.
+* **Automatic method choice** – along the plot the tool first tries half-height
+  crop edges; when the plot ends are shaded or ragged (edges found on < 70 % of
+  plots, or the crop reads < 85 % of the polygon length) it switches to centring
+  each plot between the two alleys, keeping the length. Across rows it uses each
+  plot's own two gaps when ≥ 60 % of plots show clear gaps (bare gaps between
+  plots, e.g. small-plot trials), otherwise one shift per range. Gaps and alleys
+  are located by the centre of their low run, not the single lowest pixel, so
+  wide flat alleys do not bias the centre.
 
 Outputs next to the grid: `<grid>_refit.shp` (extra columns `plot_len`,
 `along_off`, `across_off`, `crop_len`, `refine_ok`), `<grid>_refit_report.csv`

@@ -30,6 +30,7 @@ refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
 render_refine_qa(chm_tif, old_gdf, new_gdf, report, out_png) -> out_png
 """
 from __future__ import annotations
+import os
 import numpy as np
 
 
@@ -83,6 +84,26 @@ def _half_height_edges(profile, coords, plateau_q=0.9, frac=0.5):
     return e_lo, e_hi, plateau
 
 
+def _gap_centre(coords, profile, lo, hi, plateau):
+    """Centre of the bare gap inside [lo, hi]: the run of samples below the
+    midpoint between the plateau and the window minimum, around that minimum.
+    Robust for wide flat alleys where the single lowest sample is arbitrary.
+    Returns (centre, minimum value) or (nan, nan)."""
+    m = (coords >= lo) & (coords <= hi) & np.isfinite(profile)
+    if m.sum() < 3:
+        return np.nan, np.nan
+    c = coords[m]; p = profile[m]
+    k = int(np.argmin(p)); zmin = float(p[k])
+    if not np.isfinite(plateau) or plateau <= zmin:
+        return float(c[k]), zmin
+    thr = zmin + 0.5 * (plateau - zmin)
+    a = k
+    while a > 0 and p[a - 1] < thr: a -= 1
+    b = k
+    while b < len(p) - 1 and p[b + 1] < thr: b += 1
+    return float(0.5 * (c[a] + c[b])), zmin
+
+
 def _estimate_pitch(plots_gdf, hw):
     """Median centre-to-centre distance to the nearest neighbour (across rows)."""
     c = np.array([[g.centroid.x, g.centroid.y] for g in plots_gdf.geometry])
@@ -94,7 +115,17 @@ def _estimate_pitch(plots_gdf, hw):
 
 def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
                           shrink_max_m=0.5, along_search_m=1.2, apply_across=True,
-                          group_col=None, progress_cb=None):
+                          group_col=None, progress_cb=None, across_mode="group",
+                          max_across_shift_m=0.25, along_mode="edges",
+                          max_along_shift_m=None):
+    """See module docstring.  across_mode: 'group' (one shift per range from the
+    folded median profile - for closed canopies where furrows are faint) or
+    'plot' (each plot uses the gap minima on its own two sides when they are
+    clear, otherwise its group's shift - for trials with bare gaps between
+    plots along the short axis).  along_mode: 'edges' (crop ends at half the
+    plateau height - sets centre AND length) or 'gaps' (centre from the alley
+    minima either side of the plot at +-strip pitch/2; length kept - use when
+    the plot edges are shaded or ragged so half-height edges under-read)."""
     import pandas as pd, rasterio
     from shapely.geometry import Polygon
 
@@ -102,7 +133,9 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
         if progress_cb: progress_cb(pct, msg)
 
     with rasterio.open(chm_tif) as src:
-        chm = src.read(1).astype(float); b = src.bounds; res = src.transform.a
+        chm = src.read(1).astype(float); b = src.bounds; res = src.transform.a; nd = src.nodata
+    if nd is not None:
+        chm[chm == nd] = np.nan          # nodata must not act as a deep 'gap'
     ny, nx = chm.shape
     CX = b.left + (np.arange(nx) + 0.5) * res; CY = b.top - (np.arange(ny) + 0.5) * res
     GX, GY = np.meshgrid(CX, CY)
@@ -114,6 +147,16 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
     ref_u = reference_axis(gdf)
     _, _, _, hl0, hw0 = _frame(gdf.geometry.iloc[0], ref_u)
     pitch = _estimate_pitch(gdf, hw0)
+    # strip pitch along the long axis: nearest neighbour ahead along u within the same strip
+    cxy = np.array([[g.centroid.x, g.centroid.y] for g in gdf.geometry])
+    uu_all = cxy @ ref_u; vv_all = cxy @ np.array([-ref_u[1], ref_u[0]])
+    du = uu_all[None, :] - uu_all[:, None]; dv = np.abs(vv_all[None, :] - vv_all[:, None])
+    cand = np.where((dv < hw0) & (du > 0.5 * hl0), du, np.inf).min(axis=1)
+    pitch_u = float(np.median(cand[np.isfinite(cand)])) if np.isfinite(cand).any() else 2 * hl0 + 1.0
+    if along_mode == "gaps":
+        along_search_m = max(along_search_m, pitch_u - 2 * hl0 + 0.5)     # reach past the far edge of both alleys
+    if max_along_shift_m is None:
+        max_along_shift_m = along_search_m * 0.85
 
     rows, frames, prof_v_by_group = [], [], {}
     for i, geom in enumerate(gdf.geometry):
@@ -129,19 +172,39 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
         ub = np.arange(-(hl + along_search_m), hl + along_search_m + 0.1, 0.1)
         prof_u = np.array([np.nanmean(pz[inner_v & (np.abs(u - uu) < 0.1)]) if np.any(inner_v & (np.abs(u - uu) < 0.1)) else np.nan for uu in ub])
         u_lo, u_hi, plateau = _half_height_edges(prof_u, ub)
+        if along_mode == "gaps":
+            cen_u = float(np.nanmedian(prof_u[np.abs(ub) < 0.5 * hl])) if np.isfinite(prof_u).any() else np.nan
+            half_alley = max(0.6, (pitch_u - 2 * hl) / 2 + 0.3)     # window wide enough to hold the whole alley
+            (a_lo, az_lo) = _gap_centre(ub, prof_u, -pitch_u / 2 - half_alley, -pitch_u / 2 + half_alley, cen_u)
+            (a_hi, az_hi) = _gap_centre(ub, prof_u, pitch_u / 2 - half_alley, pitch_u / 2 + half_alley, cen_u)
+            depth_u = cen_u - np.nanmean([az_lo, az_hi]) if np.isfinite(az_lo) and np.isfinite(az_hi) else np.nan
+            if (np.isfinite(depth_u) and depth_u > 0.25 * abs(cen_u) and abs((a_hi - a_lo) - pitch_u) < 0.15 * pitch_u):
+                mid = (a_lo + a_hi) / 2
+                u_lo, u_hi = mid - hl, mid + hl          # keep the polygon length, move the centre
+            else:
+                u_lo = u_hi = np.nan
         # across profile (for furrows)
         inner_u = np.abs(u) < 0.8 * hl
         vb = np.arange(-(pitch / 2 + 0.6), pitch / 2 + 0.61, 0.05)
         prof_v = np.array([np.nanmean(pz[inner_u & (np.abs(v - vv) < 0.05)]) if np.any(inner_u & (np.abs(v - vv) < 0.05)) else np.nan for vv in vb])
         prof_v_by_group.setdefault(groups[i], []).append(prof_v)
+        # per-plot gap minima either side (used when across_mode == 'plot')
+        cen = float(np.nanmedian(prof_v[np.abs(vb) < 0.5 * hw])) if np.isfinite(prof_v).any() else np.nan
+        (g_lo, gz_lo) = _gap_centre(vb, prof_v, -pitch / 2 - 0.45, -pitch / 2 + 0.45, cen)
+        (g_hi, gz_hi) = _gap_centre(vb, prof_v, pitch / 2 - 0.45, pitch / 2 + 0.45, cen)
+        gap_depth = cen - np.nanmean([gz_lo, gz_hi]) if np.isfinite(gz_lo) and np.isfinite(gz_hi) else np.nan
+        plot_across = float((g_lo + g_hi) / 2) if np.isfinite(gap_depth) else np.nan
+        plot_across_ok = bool(np.isfinite(gap_depth) and gap_depth > 0.25 * abs(cen) and abs((g_hi - g_lo) - pitch) < 0.15 * pitch
+                              and abs(plot_across) <= max_across_shift_m)
         crop_len = u_hi - u_lo; off_u = (u_hi + u_lo) / 2
         rows.append(dict(idx=i, group=groups[i], poly_len=2 * hl, poly_w=2 * hw, crop_len=crop_len, along_off=off_u,
-                         plateau_m=plateau, mean_inside_before=float(np.nanmean(pz[(np.abs(u) < hl) & (np.abs(v) < hw)]))))
+                         plateau_m=plateau, mean_inside_before=float(np.nanmean(pz[(np.abs(u) < hl) & (np.abs(v) < hw)])),
+                         across_plot=plot_across, across_plot_ok=plot_across_ok, gap_depth=gap_depth))
     rep = pd.DataFrame(rows)
 
     # plausibility: crop length within [poly-shrink_max-0.3, poly+extend_max+1.0], offset within search
     ok = (rep.crop_len.between(rep.poly_len - shrink_max_m - 0.3, rep.poly_len + extend_max_m + 1.0)
-          & (rep.along_off.abs() < along_search_m * 0.85))
+          & (rep.along_off.abs() <= max_along_shift_m))
     rep["along_ok"] = ok
     # fallback for a failed plot: its group's median offset, but only when most of the
     # group measured reliably; otherwise leave the plot where it is
@@ -167,9 +230,12 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
         # the two furrows must be a plausible pair: spacing within 15 % of the pitch and a
         # modest shift (< 0.25 m) - otherwise the minima are canopy texture, not furrows
         shift = float((f_lo + f_hi) / 2) if visible else 0.0
-        plausible = visible and abs((f_hi - f_lo) - pitch) < 0.15 * pitch and abs(shift) < 0.25
+        plausible = visible and abs((f_hi - f_lo) - pitch) < 0.15 * pitch and abs(shift) <= max_across_shift_m
         across_applied[g] = shift if (apply_across and plausible) else 0.0
     rep["across_off_applied"] = rep.group.map(across_applied)
+    if apply_across and across_mode == "plot":
+        # each plot with clear gaps on both sides uses its own shift; others keep the group shift
+        rep["across_off_applied"] = np.where(rep.across_plot_ok, rep.across_plot, rep["across_off_applied"])
     rep["furrow_visible"] = rep.group.map(lambda g: bool(np.isfinite(furrow_depth[g]) and across_applied[g] != 0.0 or (np.isfinite(furrow_depth[g]) and furrow_depth[g] > 0.02)))
 
     # rebuild polygons
@@ -203,7 +269,9 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
             ends_out_after += int((nlo < lo - 1e-6) or (nhi > hi + 1e-6))
     rep["mean_inside_after"] = after
     if "Plot_ID" in gdf.columns: rep.insert(0, "Plot_ID", gdf["Plot_ID"].values)
-    diag = dict(n=len(gdf), n_along_ok=int(ok.sum()), pitch_m=pitch, axis_u=[float(ref_u[0]), float(ref_u[1])],
+    diag = dict(n=len(gdf), n_along_ok=int(ok.sum()), pitch_m=pitch, pitch_along_m=pitch_u, along_mode=along_mode,
+                axis_u=[float(ref_u[0]), float(ref_u[1])],
+                across_mode=across_mode, n_across_plot_ok=int(rep.across_plot_ok.sum()),
                 along_off_median_by_group={k: float(v) for k, v in grp_med.items()},
                 across_off_by_group=across_applied, furrow_depth_by_group={k: (float(v) if np.isfinite(v) else None) for k, v in furrow_depth.items()},
                 crop_len_median=float(np.nanmedian(rep.crop_len[ok])) if ok.any() else None,
@@ -214,18 +282,73 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
     return out, rep, diag
 
 
+def refine_grid_auto(raster_tif, plots_gdf, progress_cb=None, **kw):
+    """Choose the detection modes from the data, then refine.
+
+    * along axis: try half-height crop edges; if fewer than 70 % of plots measure
+      reliably or the crop reads shorter than 85 % of the polygon (shaded or
+      ragged plot ends), switch to alley-gap centring with the length kept
+    * across axis: per-plot gap minima when at least 60 % of plots show clear
+      gaps on both sides (bare gaps between plots), else one shift per range
+    Returns (gdf, report, diag) with diag['auto'] describing the choice.
+    """
+    kw = dict(kw); kw.pop("along_mode", None); kw.pop("across_mode", None)
+    gdf, rep, diag = refine_grid_to_canopy(raster_tif, plots_gdf, progress_cb=progress_cb,
+                                           along_mode="edges", across_mode="plot", **kw)
+    n = len(rep); ok_frac = rep.along_ok.mean()
+    short = np.nanmedian(rep.crop_len[rep.along_ok]) < 0.85 * rep.poly_len.median() if rep.along_ok.any() else True
+    across_mode = "plot" if rep.across_plot_ok.mean() >= 0.6 else "group"
+    along_mode = "gaps" if (ok_frac < 0.7 or short) else "edges"
+    if along_mode == "gaps":
+        kw.setdefault("extend_max_m", 0.0); kw["shrink_max_m"] = 0.0
+    if along_mode != "edges" or across_mode != "plot":
+        gdf, rep, diag = refine_grid_to_canopy(raster_tif, plots_gdf, progress_cb=progress_cb,
+                                               along_mode=along_mode, across_mode=across_mode, **kw)
+    diag["auto"] = dict(along_mode=along_mode, across_mode=across_mode,
+                        edges_ok_frac=float(ok_frac), crop_len_short=bool(short))
+    return gdf, rep, diag
+
+
+def vegetation_index_from_rgb(rgb_tif, plots_gdf, out_tif):
+    """Build a crop-vs-soil index raster from an RGB(A) orthomosaic for grid
+    refinement when no LiDAR CHM is available. Tries excess-green (true colour)
+    and excess-blue (false-colour composites where vegetation renders blue) and
+    keeps the one with the larger plot-interior minus surroundings contrast.
+    Returns (out_tif, index_name, contrast)."""
+    import rasterio
+    from rasterio.features import geometry_mask
+    with rasterio.open(rgb_tif) as s:
+        a = s.read().astype(float); prof = s.profile; tr = s.transform; shape = (s.height, s.width)
+    R, G, B = a[0], a[1], a[2]; valid = a[:3].sum(0) > 0
+    cands = {"ExG": 2 * G - R - B, "ExB": 2 * B - R - G}
+    inside = geometry_mask(list(plots_gdf.geometry), out_shape=shape, transform=tr, invert=True)
+    ring = geometry_mask([g.buffer(0.6) for g in plots_gdf.geometry], out_shape=shape, transform=tr, invert=True) & ~inside
+    best, best_c = None, -np.inf
+    for name, idx in cands.items():
+        c = float(np.nanmean(idx[inside & valid]) - np.nanmean(idx[ring & valid]))
+        if c > best_c: best, best_c = name, c
+    out = np.where(valid, cands[best], -9999).astype("float32")
+    prof2 = dict(driver="GTiff", width=shape[1], height=shape[0], count=1, dtype="float32", crs=prof["crs"], transform=tr,
+                 nodata=-9999, compress="deflate", tiled=True)
+    if os.path.exists(out_tif): os.remove(out_tif)
+    with rasterio.open(out_tif, "w", **prof2) as dst: dst.write(out, 1)
+    return out_tif, best, best_c
+
+
 def render_refine_qa(chm_tif, old_gdf, new_gdf, report, out_png, n_zoom=6):
     import rasterio, matplotlib
     matplotlib.use("Agg"); import matplotlib.pyplot as plt
     with rasterio.open(chm_tif) as src:
-        chm = src.read(1); b = src.bounds; res = src.transform.a
-    idx = report.sort_values("along_off", key=np.abs, ascending=False).idx.values[:n_zoom]
+        chm = src.read(1).astype(float); b = src.bounds; res = src.transform.a; nd = src.nodata
+    if nd is not None: chm[chm == nd] = np.nan
+    vmin, vmax = np.nanpercentile(chm, [2, 98])
+    idx = report.sort_values("along_off_applied", key=np.abs, ascending=False).idx.values[:n_zoom]
     fig, axes = plt.subplots(1, n_zoom, figsize=(3.2 * n_zoom, 3.6))
     for ax, i in zip(np.atleast_1d(axes), idx):
         g = new_gdf.geometry.iloc[i]; minx, miny, maxx, maxy = g.buffer(1.2).bounds
         r0 = max(0, int((b.top - maxy) / res)); r1 = min(chm.shape[0], int((b.top - miny) / res))
         c0 = max(0, int((minx - b.left) / res)); c1 = min(chm.shape[1], int((maxx - b.left) / res))
-        ax.imshow(chm[r0:r1, c0:c1], extent=(b.left + c0 * res, b.left + c1 * res, b.top - r1 * res, b.top - r0 * res), cmap="viridis", origin="upper")
+        ax.imshow(chm[r0:r1, c0:c1], extent=(b.left + c0 * res, b.left + c1 * res, b.top - r1 * res, b.top - r0 * res), cmap="viridis", origin="upper", vmin=vmin, vmax=vmax)
         old_gdf.geometry.iloc[[i]].boundary.plot(ax=ax, color="red", linewidth=1.2, linestyle="--")
         new_gdf.geometry.iloc[[i]].boundary.plot(ax=ax, color="white", linewidth=1.6)
         r = report.iloc[i]; pid = r.get("Plot_ID", i + 1)

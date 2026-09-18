@@ -195,9 +195,16 @@ class _RefineWorker(QThread):
     def run(self):
         try:
             kw = self._kw
-            from phenoapp.core.grid_refine import refine_grid_to_canopy, render_refine_qa
-            chm = kw["chm"]
-            if not os.path.exists(chm):
+            from phenoapp.core.grid_refine import (refine_grid_auto, render_refine_qa,
+                                                    vegetation_index_from_rgb)
+            chm = kw["chm"]; index_note = ""
+            if kw.get("source") == "rgb":
+                self.progress.emit(5, "Building a vegetation index from the RGB orthomosaic...")
+                out_dir = os.path.dirname(kw["out_shp"]); os.makedirs(out_dir, exist_ok=True)
+                chm, name, contrast = vegetation_index_from_rgb(
+                    kw["ortho"], kw["gdf"], os.path.join(out_dir, "grid_refine_veg_index.tif"))
+                index_note = f" (RGB index {name}, plot/alley contrast {contrast:.0f})"
+            elif not os.path.exists(chm):
                 from phenoapp.core import LASManager
                 from phenoapp.core.surface_models import build_surface_models
                 mgr = LASManager(kw["las_path"], kw["work_crs"], kw["use_smrf"])
@@ -208,7 +215,8 @@ class _RefineWorker(QThread):
                                            hag=mgr.hag, dsm_res=0.10, dtm_mode="exterior",
                                            progress_cb=lambda p, m: self.progress.emit(int(35 + p * 0.3), m))
                 chm = res["paths"]["chm"]
-            gdf, rep, diag = refine_grid_to_canopy(chm, kw["gdf"], progress_cb=lambda p, m: self.progress.emit(int(65 + p * 0.3), m))
+            gdf, rep, diag = refine_grid_auto(chm, kw["gdf"], progress_cb=lambda p, m: self.progress.emit(int(65 + p * 0.3), m))
+            diag["index_note"] = index_note
             save_grid(gdf, kw["out_shp"])
             stem = os.path.splitext(kw["out_shp"])[0]
             rep.round(3).to_csv(stem + "_report.csv", index=False)
@@ -536,23 +544,46 @@ class EditTab(QWidget):
         length from the crop edges, and apply a per-range across-row shift when
         the furrows are visible. Builds the CHM first if none exists."""
         s = state()
-        if not s.las_path or not os.path.exists(s.las_path):
-            QMessageBox.warning(self, "No LAS", "Load a project first (the CHM is built from the point cloud).")
+        has_las = bool(s.las_path and os.path.exists(s.las_path))
+        has_ortho = bool(s.ortho_tif and os.path.exists(s.ortho_tif))
+        if not has_las and not has_ortho:
+            QMessageBox.warning(self, "Nothing to measure on",
+                "Load a project with a point cloud (for a CHM) or an RGB orthomosaic first.")
             return
         plots = self._all_plots()
         if not plots or self._grid_attrs is None:
             QMessageBox.warning(self, "No grid", "Click 'Reload from Project' first to load plots.")
             return
-        s.derive_default_paths()
-        base = os.path.splitext(os.path.basename(s.las_path))[0]
-        chm = os.path.join(os.path.dirname(s.out_csv), "surface_models", f"{base}_CHM.tif")
+        if has_las:
+            s.derive_default_paths()
+        anchor = s.las_path if has_las else s.ortho_tif
+        base = os.path.splitext(os.path.basename(anchor))[0]
+        chm = os.path.join(os.path.dirname(s.out_csv) if s.out_csv else os.path.dirname(anchor),
+                           "surface_models", f"{base}_CHM.tif")
+        # raster source: LiDAR CHM (default) or a vegetation index from the RGB orthomosaic
+        source = "chm" if has_las else "rgb"
+        if has_las and has_ortho:
+            box = QMessageBox(self); box.setWindowTitle("Refine plots to crop")
+            box.setText("Which raster should the plot edges be measured on?")
+            box.setInformativeText(
+                "LiDAR canopy height model: built from the point cloud (default; best when the crop "
+                "stands above the alleys).\nRGB orthomosaic: a crop/soil vegetation index from the loaded "
+                "ortho (no LiDAR needed; polarity is detected automatically, so false-colour composites work).")
+            b_chm = box.addButton("LiDAR CHM", QMessageBox.AcceptRole)
+            b_rgb = box.addButton("RGB orthomosaic", QMessageBox.AcceptRole)
+            box.addButton(QMessageBox.Cancel); box.exec_()
+            if box.clickedButton() is b_rgb:
+                source = "rgb"
+            elif box.clickedButton() is not b_chm:
+                return
         polys = [it.shapely() for it in sorted(plots, key=lambda x: x.plot_idx)]
         gdf = gpd.GeoDataFrame(self._grid_attrs.copy(), geometry=polys, crs=self._grid_crs)
-        out_shp = (s.saved_grid or s.grid_path or os.path.join(os.path.dirname(s.las_path), "aligned_grid.shp"))
+        out_shp = (s.saved_grid or s.grid_path or os.path.join(os.path.dirname(anchor), "aligned_grid.shp"))
         out_shp = os.path.splitext(out_shp)[0].replace("_refit", "") + "_refit.shp"
-        self.lbl_status.setText("Refining plots to the crop... (building the CHM first if needed)")
+        self.lbl_status.setText("Refining plots to the crop... (building the raster first if needed)")
         self._refine_worker = _RefineWorker(dict(las_path=s.las_path, work_crs=s.work_crs, use_smrf=s.use_smrf,
-                                                 chm=chm, gdf=gdf, out_shp=out_shp))
+                                                 chm=chm, gdf=gdf, out_shp=out_shp, source=source,
+                                                 ortho=s.ortho_tif))
         self._refine_worker.done_ok.connect(self._on_refined)
         self._refine_worker.error.connect(lambda e: QMessageBox.critical(self, "Refine failed", e))
         self._refine_worker.progress.connect(lambda p, m: self.lbl_status.setText(f"[{p}%] {m}"))
@@ -570,9 +601,13 @@ class EditTab(QWidget):
                 self._grid_attrs[col] = list(new[col].values)
         s.saved_grid = res["out_shp"]
         self.lbl_status.setText(f"Refined grid saved → {res['out_shp']} (Undo reverts the view; the file stays)")
-        across = ", ".join(f"{k}: {v:+.2f} m" for k, v in d["across_off_by_group"].items())
+        auto = d.get("auto", {})
+        across = (f"per plot ({d.get('n_across_plot_ok', 0)} plots with clear gaps on both sides)"
+                  if auto.get("across_mode") == "plot"
+                  else ", ".join(f"{k}: {v:+.2f} m" for k, v in d["across_off_by_group"].items()))
         along = ", ".join(f"{k}: {v:+.2f} m" for k, v in d["along_off_median_by_group"].items())
         QMessageBox.information(self, "Plots refined to the crop",
+            f"Raster: {'RGB orthomosaic' + d['index_note'] if d.get('index_note') else 'LiDAR CHM'}; modes: along = {auto.get('along_mode', 'edges')}, across = {auto.get('across_mode', 'group')}\n"
             f"{d['n_along_ok']} of {d['n']} plots measured reliably (others use their range median).\n\n"
             f"Crop length median {d['crop_len_median']:.2f} m vs polygon {d['poly_len']:.2f} m -> new length median {d['new_len_median']:.2f} m\n"
             f"Along-plot offset applied, median by range: {along}\n"
