@@ -188,13 +188,19 @@ class VNIRCube:
         minx = min(g.bounds[0] for g in geoms); miny = min(g.bounds[1] for g in geoms)
         maxx = max(g.bounds[2] for g in geoms); maxy = max(g.bounds[3] for g in geoms)
         uw = from_bounds(minx, miny, maxx, maxy, tr).round_offsets().round_lengths()
-        uw = uw.intersection(Window(0, 0, src.width, src.height))
+        try:
+            uw = uw.intersection(Window(0, 0, src.width, src.height))
+        except Exception:
+            raise RuntimeError("None of the plots overlap the VNIR cube.")
         u_r0, u_c0 = int(uw.row_off), int(uw.col_off)
 
         specs = []
         for pid, nm, g in zip(pids, names, geoms):
             w = from_bounds(*g.bounds, tr).round_offsets().round_lengths()
-            w = w.intersection(Window(0, 0, src.width, src.height))
+            try:
+                w = w.intersection(Window(0, 0, src.width, src.height))
+            except Exception:                 # plot entirely outside the cube
+                specs.append(None); continue
             if w.width <= 0 or w.height <= 0:
                 specs.append(None); continue
             wt = rasterio.windows.transform(w, tr)
