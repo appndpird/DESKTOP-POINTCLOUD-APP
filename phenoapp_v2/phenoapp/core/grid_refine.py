@@ -217,7 +217,12 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
     # across: per-group furrow check on the folded median profile
     across_applied, furrow_depth = {}, {}
     vb = np.arange(-(pitch / 2 + 0.6), pitch / 2 + 0.61, 0.05)
+    data_frac = rep.groupby("group").mean_inside_before.apply(lambda x: float(x.notna().mean()))
     for g, profs in prof_v_by_group.items():
+        if data_frac.get(g, 0.0) < 0.5 or len(profs) < 3:
+            # most of this range lies outside the raster (edge of a partial flight): no evidence for a group shift
+            across_applied[g] = 0.0; furrow_depth[g] = np.nan
+            continue
         med = np.nanmedian(np.array(profs), axis=0)
         def furrow(lo, hi):
             m = (vb >= lo) & (vb <= hi) & np.isfinite(med)
@@ -232,6 +237,15 @@ def refine_grid_to_canopy(chm_tif, plots_gdf, margin_m=0.20, extend_max_m=0.5,
         shift = float((f_lo + f_hi) / 2) if visible else 0.0
         plausible = visible and abs((f_hi - f_lo) - pitch) < 0.15 * pitch and abs(shift) <= max_across_shift_m
         across_applied[g] = shift if (apply_across and plausible) else 0.0
+    # group shifts must agree with each other: a georeferencing offset between flights is the same for
+    # every range, so a range that disagrees with the trial-wide median by > 0.15 m is furrow noise
+    # (typical of merged canopies at maturity) and takes the trial-wide value instead
+    vals = np.array([v for v in across_applied.values()])
+    if across_mode == "group" and len(vals) >= 3:      # in 'plot' mode the group value is only a fallback
+        trial_med = float(np.median(vals))
+        for g in list(across_applied):
+            if abs(across_applied[g] - trial_med) > 0.15:
+                across_applied[g] = trial_med
     rep["across_off_applied"] = rep.group.map(across_applied)
     if apply_across and across_mode == "plot":
         # each plot with clear gaps on both sides uses its own shift; others keep the group shift
