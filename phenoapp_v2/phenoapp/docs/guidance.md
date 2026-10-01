@@ -394,6 +394,17 @@ orange noise, while the GRYFN `*.rgb.tif` preview is a false-colour product
 in which crop renders blue. Per-plot cubes written by PhenoApp now carry a
 `.qml` sidecar (NIR/red/green composite) that QGIS applies automatically.
 
+**No holes in the per-plot cubes (v2.2.1).** Pixel values inside the polygon
+are exact copies of the orthomosaic, including the zeros GRYFN writes where
+reflectance went negative (most of 400-500 nm, a few percent of pixels at
+670 nm). Earlier files declared `nodata = 0`, so QGIS made every such pixel
+transparent and the plots looked holed, although the same zeros are present
+in the orthomosaic (rendered black there because the ENVI file has no nodata
+tag). The writer now stores the plot polygon as an internal GDAL mask and sets
+no nodata tag: only the area outside the polygon is transparent, every pixel
+inside is shown, and the values are still bit-exact. The Biomass-tab option
+"Also write per-plot VNIR cubes" uses this writer.
+
 ## Canopy-top plant height (cth_* traits) and reference targets
 
 `h_p95` / `h_p99` are percentiles of *all* points in the plot, so they depend

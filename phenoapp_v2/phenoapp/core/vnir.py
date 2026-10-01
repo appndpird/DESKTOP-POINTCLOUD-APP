@@ -170,11 +170,22 @@ class VNIRCube:
 
     # ------------------------------------------------------------------
     def write_plot_cubes(self, plots, out_dir, progress_cb=None,
-                         compress="deflate", name_col="B/R"):
-        """Write one multi-band GeoTIFF per plot: every cube band, clipped to the
-        FULL plot polygon (pixels outside the polygon = 0 = nodata), same
-        pixel grid / CRS as the orthomosaic, wavelengths stored as band
-        descriptions and in a 'wavelengths_nm' tag.
+                         compress="deflate", name_col="B/R", clip="polygon",
+                         name_fmt="plot_{pid}_{name}", plot_ids=None):
+        """Write one multi-band GeoTIFF per plot: every cube band, every pixel
+        value exactly as in the orthomosaic (same grid, CRS, dtype; lossless
+        DEFLATE), wavelengths as band descriptions and in a 'wavelengths_nm' tag.
+
+        clip = "polygon" : the bounding window of the plot; pixels outside the
+                           polygon are flagged by an INTERNAL GDAL MASK (per
+                           dataset) and written as 0. No nodata tag is set, so
+                           a pixel that is 0 in the orthomosaic (GRYFN clips
+                           negative reflectance to 0) stays a visible value in
+                           QGIS instead of a transparent hole; only the area
+                           outside the polygon is transparent.
+        clip = "bbox"    : the bounding window as is, nothing masked.
+        name_fmt         : file name pattern with {pid} and {name}
+        plot_ids         : optional list of Plot_IDs to write (default all)
 
         Bands are read once each for the whole trial and sliced per plot, so
         the cube is streamed one band at a time; all per-plot files are kept
@@ -187,18 +198,30 @@ class VNIRCube:
         from rasterio.windows import Window, from_bounds
         from rasterio.features import geometry_mask
         os.makedirs(out_dir, exist_ok=True)
+        if plot_ids is not None:
+            keep = set(int(p) for p in plot_ids)
+            plots = plots[plots["Plot_ID"].astype(int).isin(keep)]
         src = self._src; tr = src.transform; nb = src.count
         geoms = list(plots.geometry)
         pids = list(plots["Plot_ID"]) if "Plot_ID" in plots else list(range(1, len(geoms) + 1))
         names = list(plots[name_col]) if name_col in plots else [f"P{p}" for p in pids]
 
-        minx = min(g.bounds[0] for g in geoms); miny = min(g.bounds[1] for g in geoms)
-        maxx = max(g.bounds[2] for g in geoms); maxy = max(g.bounds[3] for g in geoms)
-        uw = from_bounds(minx, miny, maxx, maxy, tr).round_offsets().round_lengths()
-        try:
-            uw = uw.intersection(Window(0, 0, src.width, src.height))
-        except Exception:
+        # union read window built from the per-plot INTEGER windows (rounding the
+        # union bounds separately could be one pixel short on the last row/column)
+        wins = []
+        for g in geoms:
+            w = from_bounds(*g.bounds, tr).round_offsets().round_lengths()
+            try:
+                w = w.intersection(Window(0, 0, src.width, src.height))
+            except Exception:
+                continue
+            if w.width > 0 and w.height > 0:
+                wins.append(w)
+        if not wins:
             raise RuntimeError("None of the plots overlap the VNIR cube.")
+        r_lo = min(int(w.row_off) for w in wins); c_lo = min(int(w.col_off) for w in wins)
+        r_hi = max(int(w.row_off + w.height) for w in wins); c_hi = max(int(w.col_off + w.width) for w in wins)
+        uw = Window(c_lo, r_lo, c_hi - c_lo, r_hi - r_lo)
         u_r0, u_c0 = int(uw.row_off), int(uw.col_off)
 
         specs = []
@@ -211,33 +234,44 @@ class VNIRCube:
             if w.width <= 0 or w.height <= 0:
                 specs.append(None); continue
             wt = rasterio.windows.transform(w, tr)
-            inside = ~geometry_mask([g], out_shape=(int(w.height), int(w.width)), transform=wt, invert=False)
+            if clip == "bbox":
+                inside = np.ones((int(w.height), int(w.width)), bool)
+            else:
+                inside = ~geometry_mask([g], out_shape=(int(w.height), int(w.width)), transform=wt, invert=False)
             safe = re.sub(r"[^A-Za-z0-9_-]", "_", str(nm))
-            path = os.path.join(out_dir, f"plot_{pid}_{safe}.tif")
+            path = os.path.join(out_dir, name_fmt.format(pid=pid, name=safe) + ".tif")
             prof = dict(driver="GTiff", width=int(w.width), height=int(w.height), count=nb, dtype=src.dtypes[0],
-                        crs=src.crs, transform=wt, nodata=0, compress=compress, tiled=True,
+                        crs=src.crs, transform=wt, compress=compress, tiled=True,
                         blockxsize=256, blockysize=256, BIGTIFF="IF_SAFER")
             dst = rasterio.open(path, "w", **prof)
             for b in range(1, nb + 1):
                 dst.set_band_description(b, f"{self.wavelengths[b-1]:.1f} nm")
             dst.update_tags(Plot_ID=str(pid), plot_name=str(nm), source=os.path.basename(self.path),
                             wavelengths_nm=",".join(f"{w_:.2f}" for w_ in self.wavelengths),
-                            clip="full plot polygon; 0 = outside polygon / nodata")
+                            clip=("bounding box, nothing masked" if clip == "bbox" else
+                                  "plot polygon via internal GDAL mask; pixel values inside are exact copies "
+                                  "of the orthomosaic (0 = clipped reflectance, NOT nodata); outside = masked"),
+                            pixel_values="lossless copy of the orthomosaic (uint16 reflectance x scale factor)")
             specs.append(dict(pid=pid, name=nm, path=path, dst=dst, inside=inside,
                               r0=int(w.row_off) - u_r0, c0=int(w.col_off) - u_c0, h=int(w.height), w=int(w.width)))
         try:
-            for b in range(1, nb + 1):
-                band = src.read(b, window=uw)
-                for sp in specs:
-                    if sp is None:
-                        continue
-                    sub = band[sp["r0"]:sp["r0"] + sp["h"], sp["c0"]:sp["c0"] + sp["w"]]
-                    if sub.shape != sp["inside"].shape:
-                        pad = np.zeros(sp["inside"].shape, dtype=band.dtype)
-                        pad[:sub.shape[0], :sub.shape[1]] = sub; sub = pad
-                    sp["dst"].write(np.where(sp["inside"], sub, 0).astype(band.dtype), b)
-                if progress_cb and (b % 8 == 0 or b == nb):
-                    progress_cb(int(100 * b / nb), f"per-plot VNIR cubes: band {b}/{nb}")
+            with rasterio.Env(GDAL_TIFF_INTERNAL_MASK=True):
+                for b in range(1, nb + 1):
+                    band = src.read(b, window=uw)
+                    for sp in specs:
+                        if sp is None:
+                            continue
+                        sub = band[sp["r0"]:sp["r0"] + sp["h"], sp["c0"]:sp["c0"] + sp["w"]]
+                        if sub.shape != sp["inside"].shape:
+                            pad = np.zeros(sp["inside"].shape, dtype=band.dtype)
+                            pad[:sub.shape[0], :sub.shape[1]] = sub; sub = pad
+                        sp["dst"].write(np.where(sp["inside"], sub, 0).astype(band.dtype), b)
+                    if progress_cb and (b % 8 == 0 or b == nb):
+                        progress_cb(int(100 * b / nb), f"per-plot VNIR cubes: band {b}/{nb}")
+                if clip != "bbox":
+                    for sp in specs:
+                        if sp is not None:
+                            sp["dst"].write_mask((sp["inside"] * 255).astype("uint8"))
         finally:
             for sp in specs:
                 if sp is not None:

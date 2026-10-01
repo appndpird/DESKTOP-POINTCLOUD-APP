@@ -558,7 +558,7 @@ class ViewPanel(QWidget):
                 anyvalid = (a > 0) if anyvalid is None else (anyvalid | (a > 0))
                 chans.append(self._stretch(a, pct))
             img = np.dstack(chans)
-            # nodata (0 in every channel: outside the polygon / cube) shown
+            # outside the polygon / cube (0 in every channel) shown
             # white; a channel clipped to 0 inside the canopy just renders dark
             img[~anyvalid] = 1.0
             return img, None

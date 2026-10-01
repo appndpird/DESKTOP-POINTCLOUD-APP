@@ -196,7 +196,8 @@ class BiomassTab(QWidget):
         self.cb_vnir_cubes.setChecked(False)
         self.cb_vnir_cubes.setToolTip(
             "Like the per-plot LAS files on the Traits tab, but for the hyperspectral cube: one "
-            "GeoTIFF per plot with every band, clipped to the full plot polygon (0 outside), "
+            "GeoTIFF per plot with every band; pixel values are exact copies of the orthomosaic and the plot "
+            "polygon is an internal mask (no nodata tag, so clipped 0 values inside the plot stay visible), "
             "wavelengths as band descriptions. Written to <project>/plots_vnir/. Files are large "
             "(tens of MB per plot at 1.5 cm pixels) - tick only when building a dataset.")
         self.btn_vnir.clicked.connect(self._run_vnir)
