@@ -11,7 +11,9 @@ mean spectrum), with QC (sd, valid-pixel fraction) and a provenance JSON;
 optional index GeoTIFFs. Its View sub-tab shows the cube, selected plots or
 per-plot files as composites, single bands or indices with click-to-spectrum.
 Per-plot VNIR cubes get a QGIS `.qml` sidecar. The Visualize tab gained a
-per-plot LiDAR 3D viewer. See `phenoapp/docs/guidance.md`.
+per-plot LiDAR 3D viewer. **v2.2:** tab 8 "Height Models" trains and saves plant-height models
+(cth_p95 calibration, ridge / random forest / XGBoost on 7 structure features) and applies them to
+new flights. See `phenoapp/docs/guidance.md`.
 
 Developed by **Dr. Muhammad Ibrahim**, Research Scientist, DPIRD,
 under the supervision of **Dr. Hammad Khan**, Senior Research Scientist, DPIRD,

@@ -26,3 +26,5 @@ from .models        import (MODEL_SUITE, fit_model_suite, results_table,
                             save_models, load_models, apply_pls,
                             loocv_linear)
 from .qc            import run_qc, format_report
+from .height_models import (HEIGHT_MODELS, fit_height_models, apply_height_model,
+                            save_height_model, load_height_model)

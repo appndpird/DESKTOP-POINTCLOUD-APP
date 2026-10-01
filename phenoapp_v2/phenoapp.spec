@@ -23,6 +23,14 @@ for pkg in ("pyproj", "rasterio", "fiona", "shapely", "geopandas",
             "laspy", "pyvista", "pyvistaqt"):
     datas += collect_data_files(pkg)
     hiddenimports += collect_submodules(pkg)
+# Height Models tab: scikit-learn + joblib (required), xgboost (optional - bundled only if installed)
+for pkg in ("sklearn", "joblib", "threadpoolctl", "xgboost"):
+    try:
+        __import__(pkg)
+    except ImportError:
+        continue
+    datas += collect_data_files(pkg)
+    hiddenimports += collect_submodules(pkg)
 
 # Bundle PROJ + GDAL data dirs so the rthooks can point at them.
 _env_root   = os.path.dirname(sys.executable)

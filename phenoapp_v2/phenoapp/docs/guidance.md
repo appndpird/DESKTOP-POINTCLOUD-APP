@@ -442,6 +442,28 @@ scale x measured (offset only with fewer than three targets) and writes
 `_target_calibration.json`. Keep a 15-20 plot hand-measured subset each season
 to confirm, and pool seasons once several are available.
 
+## Height Models (tab 8)
+
+Trains plant-height models on the Traits-tab metrics (the canopy-top `cth_*`
+heights, cover fraction, roughness, point density and percentile heights must be
+ticked) against a measured-height CSV (`Plot_ID, height_cm`). Four models can be
+ticked, validated leave-one-out or 5-fold:
+
+| Model | Features | When to use |
+|---|---|---|
+| Linear calibration on `cth_p95` | 1 | reporting within a trial; the reference (Muresk 2025: LOOCV 3.8 cm, at the ruler's noise floor) |
+| Ridge, 7 structure features | cth_p95, tip thinness, cth_cover, cover_frac, roughness, vertical spread, point density | best within a flight by 0.1-0.4 cm; does not transfer |
+| Random forest, 7 structure features | same | the model to carry to another date or trial (5.3 cm raw, 4.9 cm with a per-flight offset) |
+| XGBoost, 7 structure features, monotone in cth_p95 | same | alternative boosted model (needs the xgboost package) |
+
+Outputs next to the metrics CSV: `<metrics>_height_predictions.csv` (measured,
+full-fit `pred_*` and held-out `predcv_*` per model), `<metrics>_height_models.json`
+(metrics, calibration line, feature lists) and one `<metrics>_height_model_<key>.joblib`
+per model. "Apply a saved model" predicts every plot of another flight's metrics CSV
+with an optional per-flight offset (from reference targets or a few measured plots)
+and writes `<metrics>_height_applied_<key>.csv`. Always plot `predcv_*`, not `pred_*`,
+when judging accuracy.
+
 ## LiDAR plot viewer (Visualize tab)
 
 Besides the whole-trial cloud, the Visualize tab can open the per-plot LAS
