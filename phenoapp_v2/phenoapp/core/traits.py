@@ -53,6 +53,40 @@ TRAITS_CATALOG = [
     ("h_p95_local", "Height", "p95 height vs local baseline",
         "(95th-pct Z) - (1st-pct Z) within the plot. Robust local height; "
         "compare to h_p95 to detect SMRF inconsistencies."),
+    # ---- Canopy-top surface heights (transferable plant height; core.canopy_top) ----
+    ("cth_p90",     "Height", "Canopy-top P90 (cell maxima)",
+        "Plot gridded at 5 cm, highest point per cell after noise removal and 2 cm "
+        "voxel thinning, edge trimmed 15 cm; 90th percentile of the cell maxima. "
+        "Describes the upper canopy surface, so it is far less sensitive to canopy "
+        "penetration (flying height, density, wind) than p95/p99 of all points."),
+    ("cth_p95",     "Height", "Canopy-top P95 (cell maxima) - recommended plant height",
+        "95th percentile of the 5 cm cell maxima on the plot-local ground. Muresk NUE 2025 anthesis flight vs ruler: r 0.68, error SD 3.8 cm, slope 0.89, range drift 2.7 cm (h_p99 on the trial-wide ground: r 0.31, drift 10 cm)."),
+    ("cth_p99",     "Height", "Canopy-top P99 (cell maxima)",
+        "As cth_p90 with the 99th percentile of cell maxima."),
+    ("cth_max",     "Height", "Canopy-top max (cell maxima)",
+        "Highest 5 cm cell after outlier removal."),
+    ("cth_mean",    "Height", "Canopy-top mean (cell maxima)",
+        "Mean of the cell maxima (mean surface height, not plant height)."),
+    ("cth_pt_p99",  "Height", "p99 of all points on the canopy-top ground",
+        "Legacy point percentile computed on the same ground as the cth_* metrics "
+        "(continuity with older runs)."),
+    ("cth_cover",   "Height", "Canopy-top cell coverage (QC)",
+        "Fraction of 5 cm cells inside the trimmed plot with a return. Low values "
+        "(<0.5) mean the top surface is under-sampled; cth_ok is then 0."),
+    ("cth_ground_cells", "Height", "Local ground cells used (QC)",
+        "Number of 25 cm alley cells the plot-local ground plane was fitted to "
+        "(0 = ring unusable, trial-wide ground used instead)."),
+    ("cth_ground_rms", "Height", "Local ground fit rms (m, QC)",
+        "Residual rms of the plot-local ground plane."),
+    ("cth_ground_offset", "Height", "Local minus trial-wide ground (m, QC)",
+        "Mean difference between the plot-local ring ground and the trial-wide "
+        "exterior surface under the plot. Large spread across the trial reveals "
+        "ground-model drift."),
+    ("cth_n_noise", "Height", "Noise points removed (QC)",
+        "Points removed by statistical outlier removal on the upper canopy plus "
+        "isolated points >25 cm above the canopy."),
+    ("cth_ok",      "Height", "Canopy-top quality flag",
+        "1 when the ground reference was usable and cell coverage >=0.5."),
     # ---- Cover & density ----
     ("cover_frac",  "Cover",  "Canopy cover fraction",
         "Fraction of points above height_cut. Strong biomass proxy."),

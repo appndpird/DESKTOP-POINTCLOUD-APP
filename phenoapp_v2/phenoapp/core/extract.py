@@ -56,6 +56,8 @@ def extract_all_plots(
     region_inset: float = 0.10,
     progress_cb=None,
     cancel_flag=None,
+    cth_ground: str = "local",
+    targets_csv: str | None = None,
 ) -> pd.DataFrame:
     if write_las:
         os.makedirs(out_dir, exist_ok=True)
@@ -63,6 +65,7 @@ def extract_all_plots(
     x = mgr.x; y = mgr.y; z = mgr.z
     hag = mgr.hag
     ground_diag = None
+    gm = None
 
     if ground_mode == "exterior":
         from .ground_model import fit_exterior_ground
@@ -144,6 +147,46 @@ def extract_all_plots(
     df = pd.DataFrame(rows)
     if ground_diag is not None:
         df.attrs["ground_model"] = ground_diag
+
+    # ---- canopy-top surface heights (top-surface raster on the chosen ground) ----
+    cth_keys = [k for k in selected_traits if k.startswith("cth_")]
+    if cth_keys and len(df):
+        from .canopy_top import canopy_top_all, CANOPY_TOP_KEYS, measure_targets, fit_target_calibration
+        if progress_cb:
+            progress_cb(99, "Canopy-top heights (top-surface raster)...")
+        if gm is None:
+            from .ground_model import fit_exterior_ground
+            try:
+                gm = fit_exterior_ground(x, y, z, plots)
+            except Exception:
+                gm = None
+        # 'exterior' = trial-wide smooth surface (validated best on Muresk 2025);
+        # 'local' = per-plot alley ring plane (fallback trial-wide)
+        ct = canopy_top_all(x, y, z, plots.reset_index(drop=True), ext_ground_model=gm,
+                            use_ring=(cth_ground == "local"),
+                            progress_cb=(lambda p, m: progress_cb(99, m)) if progress_cb else None)
+        keep = ["Plot_ID"] + [k for k in CANOPY_TOP_KEYS if k in cth_keys or k == "cth_ok"]
+        attrs = dict(df.attrs)                      # pandas merge drops attrs
+        # plots with no points get placeholder None columns from compute_plot_traits;
+        # drop them so the merge does not produce _x/_y suffixes
+        df = df.drop(columns=[c for c in df.columns if c.startswith("cth_")])
+        df = df.merge(ct[keep], on="Plot_ID", how="left")
+        df.attrs.update(attrs)
+        df.attrs["cth_ground"] = cth_ground
+        if targets_csv and os.path.exists(targets_csv):
+            try:
+                tg = measure_targets(x, y, z, pd.read_csv(targets_csv), gm)
+                cal = fit_target_calibration(tg)
+                df.attrs["target_calibration"] = cal
+                for k in ("cth_p90", "cth_p95", "cth_p99", "cth_max"):
+                    if k in df.columns:
+                        df[k + "_cal"] = cal["offset"] + cal["scale"] * df[k]
+                if out_csv:
+                    tg.to_csv(os.path.splitext(out_csv)[0] + "_targets.csv", index=False)
+                    with open(os.path.splitext(out_csv)[0] + "_target_calibration.json", "w") as f:
+                        json.dump(cal, f, indent=2)
+            except Exception as e:
+                df.attrs["target_calibration_error"] = str(e)
     if out_csv:
         df.to_csv(out_csv, index=False)
         if ground_diag is not None:

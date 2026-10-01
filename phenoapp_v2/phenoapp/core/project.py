@@ -40,6 +40,10 @@ class ProjectState:
     band_width:    float = 0.5        # central band width (m)
     vnir_csv:      str = ""           # per-plot VNIR indices output
     vnir_spectra:  str = ""           # per-plot spectra .npz output
+    spectral_csv:  str = ""           # per-plot spectral-index table (VNIR Spectral tab)
+    spectral_sel:  str = ""           # comma-separated index acronyms last computed
+    spectral_excl: str = ""           # excluded wavelength ranges text
+    plots_vnir_dir: str = ""          # folder of per-plot VNIR cubes
 
     # runtime-only (never serialized)
     las_loaded:        bool = field(default=False, repr=False)
@@ -92,6 +96,8 @@ class ProjectState:
             self.vnir_csv = os.path.join(proj_dir, f"{base}_vnir_plots.csv")
         if not self.vnir_spectra:
             self.vnir_spectra = os.path.join(proj_dir, f"{base}_vnir_spectra.npz")
+        if not self.spectral_csv:
+            self.spectral_csv = os.path.join(proj_dir, f"{base}_spectral_indices.csv")
 
 
 # Singleton instance (each tab imports and reads/writes this)

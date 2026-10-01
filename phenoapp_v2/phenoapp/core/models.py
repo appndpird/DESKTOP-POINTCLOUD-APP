@@ -420,7 +420,8 @@ MODEL_SUITE = [
 
 def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
                     enabled=None, progress_cb=None, cv: str = "loo",
-                    gt_unit: str = "auto", basis: str = "auto"):
+                    gt_unit: str = "auto", basis: str = "auto",
+                    extra_features=None):
     """Fit + cross-validate the whole suite.
 
     df          : merged per-plot DataFrame containing Plot_ID, region_area_m2
@@ -430,6 +431,9 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
     gt_unit     : 'auto' (from the column name: fresh_kg_ha, fresh_t_ha,
                   fresh_g_m2, fresh_kg_m2, fresh_kg = kg per plot) or an
                   explicit key from phenoapp.core.units.BIOMASS_UNITS
+    extra_features : optional list of additional per-plot columns (e.g. spectral
+                  indices from the VNIR Spectral tab) added to the Ridge / kernel-
+                  ridge feature pool when present in df
     basis       : 'fresh' (default when a fresh_* column exists), 'dry'
                   (the ground truth is dry matter: every biomass model in
                   the suite is fitted to dm_kg_ha and labelled 'Dry biomass';
@@ -580,7 +584,8 @@ def fit_model_suite(df, gt, spectra=None, spectra_ids=None,
             col = pd.Series(vals, index=all_ids)
             pred_df[f"pred_{key}"] = pred_df["Plot_ID"].map(col)
         elif predictors in ("RIDGE", "KRR"):
-            feats = [f for f in FUSED_FEATURES if f in sub.columns]
+            pool = list(FUSED_FEATURES) + [f for f in (extra_features or []) if f not in FUSED_FEATURES]
+            feats = [f for f in pool if f in sub.columns]
             if len(feats) < 3:
                 results[key] = {"label": label, "status":
                                 f"skipped - only {len(feats)} features present"}

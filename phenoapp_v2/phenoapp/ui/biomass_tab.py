@@ -105,21 +105,30 @@ class _FitWorker(QThread):
 
     def __init__(self, metrics_csv, vnir_csv, spectra_npz, gt_csv,
                  out_pred_csv, out_models_json, cv_mode="loo", enabled=None,
-                 gt_unit="auto", basis="auto"):
+                 gt_unit="auto", basis="auto", spectral_csv=None):
         super().__init__()
         self._a = (metrics_csv, vnir_csv, spectra_npz, gt_csv,
-                   out_pred_csv, out_models_json, cv_mode, enabled, gt_unit, basis)
+                   out_pred_csv, out_models_json, cv_mode, enabled, gt_unit, basis, spectral_csv)
 
     def run(self):
         try:
             import pandas as pd
             (metrics_csv, vnir_csv, spectra_npz, gt_csv,
-             out_pred_csv, out_models_json, cv_mode, enabled, gt_unit, basis) = self._a
+             out_pred_csv, out_models_json, cv_mode, enabled, gt_unit, basis, spectral_csv) = self._a
 
             df = pd.read_csv(metrics_csv)
             if vnir_csv and os.path.exists(vnir_csv):
                 vn = pd.read_csv(vnir_csv)
                 df = df.merge(vn, on="Plot_ID", how="left")
+            extra = []
+            if spectral_csv and os.path.exists(spectral_csv):
+                # indices from the VNIR Spectral tab join the Ridge / KRR pool
+                sp = pd.read_csv(spectral_csv)
+                keep = [c for c in sp.columns if c == "Plot_ID" or
+                        (c not in df.columns and pd.api.types.is_numeric_dtype(sp[c]))]
+                sp = sp[keep]
+                extra = [c for c in keep if c != "Plot_ID"]
+                df = df.merge(sp, on="Plot_ID", how="left")
             spectra = spectra_ids = None
             if spectra_npz and os.path.exists(spectra_npz):
                 z = np.load(spectra_npz, allow_pickle=False)
@@ -138,7 +147,8 @@ class _FitWorker(QThread):
             results, pred = fit_model_suite(df, gt, spectra, spectra_ids,
                                             enabled=enabled,
                                             progress_cb=cb, cv=cv_mode,
-                                            gt_unit=gt_unit, basis=basis)
+                                            gt_unit=gt_unit, basis=basis,
+                                            extra_features=extra)
             pred.to_csv(out_pred_csv, index=False)
             save_models(results, out_models_json)
 
@@ -228,6 +238,14 @@ class BiomassTab(QWidget):
             "ridge over all features. The validation table shows whether "
             "fusion actually beats the single-sensor models on your data.")
         gform.addRow("Modalities:", mod_row)
+        self.cb_use_spectral = QCheckBox(
+            "Add the indices computed on the VNIR Spectral tab to the Ridge / kernel-ridge feature pool")
+        self.cb_use_spectral.setChecked(True)
+        self.cb_use_spectral.setToolTip(
+            "When <las>_spectral_indices.csv exists (VNIR Spectral tab), its columns are merged per plot and "
+            "offered to the multi-feature models (Ridge, kernel-ridge). Single-index models are unchanged. "
+            "Watch fitR2 vs R2: many features on few plots overfit.")
+        gform.addRow("", self.cb_use_spectral)
 
         self.cb_cv = QComboBox()
         self.cb_cv.addItems([
@@ -388,10 +406,12 @@ class BiomassTab(QWidget):
         i = self.cb_gt_unit.currentIndex()
         gt_unit = "auto" if i <= 0 else UNIT_KEYS[i - 1]
         basis = ("auto", "fresh", "dry")[self.cb_basis.currentIndex()]
+        spectral_csv = s.spectral_csv if (self.cb_use_spectral.isChecked() and s.spectral_csv
+                                          and os.path.exists(s.spectral_csv)) else None
         self._wf = _FitWorker(s.out_csv, s.vnir_csv, s.vnir_spectra, gt,
                               base + "_biomass_predictions.csv",
                               base + "_biomass_models.json", cv_mode,
-                              enabled, gt_unit, basis)
+                              enabled, gt_unit, basis, spectral_csv)
         self._wf.progress.connect(self._on_prog)
         self._wf.done_ok.connect(self._on_fit_done)
         self._wf.error.connect(self._on_err)

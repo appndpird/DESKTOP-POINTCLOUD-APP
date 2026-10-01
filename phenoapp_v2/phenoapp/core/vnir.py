@@ -7,6 +7,9 @@ modelling, sampled over the same plot regions as the LiDAR traits.
 Index cheat-sheet (validated on the 2025 DPIRD Fodder trials):
   NDRE  (R800-R740)/(R800+R740) : best single fresh-biomass predictor on
                                   dense pasture (red band of NDVI saturates).
+                                  NOTE: this is the 740/800 nm variant, not the
+                                  720/790 nm NDRE of Barnes et al. (2000) nor the
+                                  ASI NDREI (705 nm); the VNIR Spectral tab offers all.
   NDVI  (R800-R670)/(R800+R670) : classic greenness; saturates on closed swards.
   WBI   R900/R970               : 970 nm water absorption; predicts dry-matter
                                   fraction (moisture), r ~ -0.8 on pasture.
@@ -95,6 +98,10 @@ class VNIRCube:
         Returns a pandas DataFrame. Nodata (0) pixels are excluded; coverage
         = valid pixels / region pixels, so cropped or striped cubes are
         visible in the output rather than silently biasing means.
+        Indices are ratios of the per-band region means (index of means),
+        computed on the sampling REGION (whole plot = polygon inset 10 cm,
+        or the central band) - not the full polygon used by
+        write_plot_cubes. The VNIR Spectral tab computes per-pixel indices.
         """
         import pandas as pd
         lab = self._labels(regions).ravel()
@@ -235,6 +242,14 @@ class VNIRCube:
             for sp in specs:
                 if sp is not None:
                     sp["dst"].close()
+        # QGIS opens a 172-band GeoTIFF as bands 1/2/3 (the noisy 399-406 nm sensor
+        # edge) - a .qml sidecar makes it open as a NIR/red/green composite instead.
+        from .spectral_indices import write_qml_sidecar, guess_scale
+        scale = guess_scale(self)
+        for sp in specs:
+            if sp is not None:
+                try: write_qml_sidecar(sp["path"], self.wavelengths, "cir", scale)
+                except Exception: pass
         rows = [dict(Plot_ID=sp["pid"], name=sp["name"], path=sp["path"], width=sp["w"], height=sp["h"],
                      px_inside=int(sp["inside"].sum())) for sp in specs if sp is not None]
         idx = pd.DataFrame(rows); idx.to_csv(os.path.join(out_dir, "plots_vnir_index.csv"), index=False)

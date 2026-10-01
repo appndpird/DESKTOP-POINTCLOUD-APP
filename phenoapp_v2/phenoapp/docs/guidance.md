@@ -332,6 +332,127 @@ std dev of these zmax values. Smooth canopy = low value; uneven canopy = high.
 
 ---
 
+## VNIR spectral indices (tab 8) and the band viewer
+
+The Biomass tab computes four fixed indices (NDVI, NDRE-740, WBI, NDWI970) as
+ratios of the per-band plot means. The **VNIR Spectral** tab opens the full
+*Awesome Spectral Indices* catalogue (Montero et al. 2023, Scientific Data;
+bundled JSON, MIT licence) plus PhenoApp narrow-band extras (red-edge position
+REP, NDRE 720/790, PRI, Vogelmann, WBI...). Indices are grouped by application
+domain (vegetation, water, soil, ...) with a checkbox per index; hover an index
+for its formula, bands and reference. "Recommended (biomass)" ticks the set that
+carried biomass information on the 2025 DPIRD trials.
+
+How a hyperspectral cube feeds a catalogue formula:
+
+* **broad bands** (N, R, G, B, RE1, RE2, RE3, N2...) are the mean of every cube
+  band whose wavelength falls inside the catalogue's range for that band
+  (e.g. N = 760-900 nm, RE1 = 695-715 nm);
+* **narrow bands** (R705, R850...) use the closest cube band;
+* **excluded ranges** are never used. Defaults for the GOBI/GRYFN cubes:
+  0-415 nm (calibration spike on the first bands), 755-770 nm (O2-A residual)
+  and 928-962 nm (water vapour). Edit them in the tab.
+
+Two computation modes:
+
+* **Per pixel, then plot mean** (recommended): the index is evaluated on every
+  pixel of the sampling region and averaged; the QC file reports the per-plot
+  standard deviation and the **valid fraction**. A pixel is valid only when
+  every band feeding the index is > 0. GRYFN cubes are unsigned integers, so
+  negative reflectance (dark canopy in the blue, and the darkest red pixels)
+  is clipped to 0: blue-based indices (EVI, VARI, ExG, TGI, SIPI, mND705...)
+  can be valid on only half the canopy pixels or less. A warning lists such
+  indices - do not use them for calibration on those cubes.
+* **On the plot mean spectrum**: fast, reuses the Biomass-tab spectra when the
+  grid matches, and reproduces the Biomass-tab NDVI/NDRE columns exactly.
+
+Outputs next to the metrics CSV: `<las>_spectral_indices.csv` (Plot_ID + one
+column per index), `_qc.csv` (sd, valid fraction), `_provenance.json`
+(formulas, band-to-wavelength mapping, exclusions, region - keep it with the
+data, as the APPN plot-delineation protocol asks for tool settings), and
+optionally one GeoTIFF per index over the trial extent (`index_rasters/`).
+The Biomass tab merges the CSV into the Ridge / kernel-ridge feature pool when
+the checkbox "Add the indices computed on the VNIR Spectral tab" is on.
+
+**Muresk NUE 2025-09-30 (anthesis, 128 plots) screening**, correlation with
+dry biomass: REP 0.44, LCI 0.42, S2REP 0.41, NDRE-740 0.36, MTCI 0.29,
+NDRE-720 0.26, NDREI 0.23, NDVI 0.14, WBI 0.04. Red-edge position beats
+every NDVI-type index on a closed canopy.
+
+### Band viewer (sub-tab "View")
+
+Shows the **whole orthomosaic** (decimated), **selected plots at full
+resolution** straight from the cube, or the **per-plot cube files** as a
+gallery. Display as a NIR/red/green composite, true colour, any custom
+wavelength triplet, a single wavelength, or any catalogue index; overlay the
+plot polygons and IDs; click a pixel to plot its full spectrum (excluded
+ranges shaded, count of clipped bands shown).
+
+Why plots "look wrong" in QGIS: a 172-band GeoTIFF opens as bands 1/2/3 =
+399/403/406 nm, the noisy sensor-edge bands, so every plot renders as
+orange noise, while the GRYFN `*.rgb.tif` preview is a false-colour product
+in which crop renders blue. Per-plot cubes written by PhenoApp now carry a
+`.qml` sidecar (NIR/red/green composite) that QGIS applies automatically.
+
+## Canopy-top plant height (cth_* traits) and reference targets
+
+`h_p95` / `h_p99` are percentiles of *all* points in the plot, so they depend
+on how many returns penetrate the canopy (flying height, scan rate, density,
+growth stage, wind), and they inherit any drift of the trial-wide ground
+surface. The canopy-top traits describe the upper canopy surface on a
+plot-local ground instead:
+
+1. noise filter: statistical outlier removal on the upper canopy slice and
+   isolated points more than 25 cm above the canopy;
+2. plot-local ground: robust plane through 25 cm alley cells (5th percentile
+   of z) in a 0.25-1.0 m ring around the plot, neighbours excluded; falls back
+   to the trial-wide surface when the ring has too few cells;
+3. density normalisation: 2 cm voxel thinning;
+4. top-surface raster: 5 cm cells, highest point per cell, plot edge trimmed
+   by 15 cm;
+5. metrics: `cth_p95` (recommended), `cth_p90`, `cth_p99`, `cth_max`,
+   `cth_mean`, plus `cth_pt_p99` for continuity;
+6. quality flags: `cth_cover`, `cth_ground_cells`, `cth_ground_rms`,
+   `cth_ground_offset` (local minus trial-wide ground), `cth_n_noise`, `cth_ok`.
+
+Muresk NUE 2025 (128 wheat plots, ruler at maturity): on the anthesis flight
+the trial-wide ground drifted 10 cm between ranges and `h_p99` reached only
+r 0.31; `cth_p95` on the plot-local ground reached r 0.68, error SD 3.8 cm,
+slope 0.89, range drift 2.7 cm, which is at the noise level of the ruler
+itself (about 4 cm; two flights agree with each other at r 0.84 but each
+agrees with the ruler at no better than 0.56-0.69). On the maturity flight the
+alleys had been disturbed and the local ground was no better than the
+trial-wide surface: watch `cth_ground_offset`, and if it varies by more than
+about 5 cm across the trial, prefer the trial-wide option or an earlier
+flight.
+
+**Why LiDAR reads below the ruler without calibration.** The ruler is held to
+the tip of the tallest heads at a few spots; the LiDAR canopy-top statistic
+is a percentile of a surface sampled by finite laser footprints, and thin
+awns and ear tips return few points, so even the 95th percentile of the cell
+maxima sits 5-15 cm below the tallest tip. The offset is systematic and stable
+across ranges once the ground is right, so it is removed by a per-flight
+calibration. **Reference targets** make that calibration independent of hand
+measurements: place three or four rigid targets of known height (60, 90,
+120 cm) in the trial for every flight, list them in a CSV
+(`name,E,N,height_m[,radius_m]`, working CRS) in the "Canopy-top height" row,
+and the tool measures them with the same pipeline, fits known = offset +
+scale x measured (offset only with fewer than three targets) and writes
+`cth_*_cal` columns plus `<metrics>_targets.csv` and
+`_target_calibration.json`. Keep a 15-20 plot hand-measured subset each season
+to confirm, and pool seasons once several are available.
+
+## LiDAR plot viewer (Visualize tab)
+
+Besides the whole-trial cloud, the Visualize tab can open the per-plot LAS
+files written by the Traits tab: pick the folder, select one or many plots,
+colour by elevation, height above the plot ground (z minus the plot's 1st
+percentile), intensity or plot ID; plot outlines and IDs are drawn above the
+canopy. Display is decimated to "Max points"; analysis always uses every
+point.
+
+---
+
 ## Tips for accurate results
 
 1. **Always tick the SMRF option** for the first run on a new LAS.

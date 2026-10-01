@@ -72,7 +72,7 @@ class AboutTab(QWidget):
         v.addLayout(h)
 
         v.addSpacing(8)
-        ver = QLabel("v1.0 — All phases (Project · Generate · Edit · Visualize · Traits · Statistics · Guidance)")
+        ver = QLabel("v2.1 (2026-10-01) — Project · QC · Generate · Edit · Visualize · Traits · Biomass · VNIR Spectral · Statistics · Guidance")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: #888; padding: 6px;")
         v.addWidget(ver)

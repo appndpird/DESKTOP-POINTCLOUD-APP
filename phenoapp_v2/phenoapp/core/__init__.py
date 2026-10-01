@@ -19,6 +19,9 @@ from .auto_align    import auto_align_grid
 from .regions       import plot_region
 from .ground_model  import fit_exterior_ground, GroundModel
 from .vnir          import VNIRCube, parse_envi_wavelengths
+from .spectral_indices import (IndexCatalogue, compute_plot_indices, write_index_rasters,
+                               compute_index_window, write_qml_sidecar, RECOMMENDED_BIOMASS,
+                               DEFAULT_EXCLUDED_NM, parse_excluded, summarise_indices)
 from .models        import (MODEL_SUITE, fit_model_suite, results_table,
                             save_models, load_models, apply_pls,
                             loocv_linear)

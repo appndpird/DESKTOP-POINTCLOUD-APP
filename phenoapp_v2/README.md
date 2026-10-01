@@ -3,6 +3,16 @@
 Desktop application for extracting plot polygons and per-plot physical traits
 from UAV LiDAR point clouds.
 
+**VNIR Spectral tab (added 2026-10-01):** tab 8 computes any of ~200 spectral
+indices from the bundled Awesome Spectral Indices catalogue
+(`phenoapp/assets/spectral_indices/`, MIT) plus PhenoApp narrow-band extras,
+grouped by category with a checkbox per index, per plot (per-pixel or on the
+mean spectrum), with QC (sd, valid-pixel fraction) and a provenance JSON;
+optional index GeoTIFFs. Its View sub-tab shows the cube, selected plots or
+per-plot files as composites, single bands or indices with click-to-spectrum.
+Per-plot VNIR cubes get a QGIS `.qml` sidecar. The Visualize tab gained a
+per-plot LiDAR 3D viewer. See `phenoapp/docs/guidance.md`.
+
 Developed by **Dr. Muhammad Ibrahim**, Research Scientist, DPIRD,
 under the supervision of **Dr. Hammad Khan**, Senior Research Scientist, DPIRD,
 APPN Director for DPIRD node.

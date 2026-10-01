@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QCheckBox, QPushButton,
     QLabel, QProgressBar, QFileDialog, QMessageBox, QFormLayout,
     QDoubleSpinBox, QGridLayout, QScrollArea, QTextEdit, QSizePolicy,
-    QComboBox
+    QComboBox, QLineEdit
 )
 
 
@@ -71,6 +71,8 @@ class _ExtractWorker(QThread):
                 ground_mode=kw.get("ground_mode", "hag"),
                 region_mode=kw.get("region_mode", "whole"),
                 band_width=kw.get("band_width", 0.5),
+                cth_ground=kw.get("cth_ground", "local"),
+                targets_csv=kw.get("targets_csv"),
                 progress_cb=pcb, cancel_flag=lambda: self._cancel,
             )
             self.progress.emit(100, "Done")
@@ -344,6 +346,34 @@ class TraitsTab(QWidget):
         surf_row.addWidget(self.dsb_dsm_res, stretch=1)
         surf_row.addWidget(self.btn_surface)
 
+        # Canopy-top plant height (cth_* traits): ground reference + reference targets
+        cth_row = QHBoxLayout()
+        self.cb_cth_ground = QComboBox()
+        self.cb_cth_ground.addItems([
+            "Plot-local alley ground (ring plane) - recommended",
+            "Trial-wide exterior surface",
+        ])
+        self.cb_cth_ground.setToolTip(
+            "Ground reference for the canopy-top heights (cth_p90 etc.).\n\n"
+            "Plot-local: a robust plane through 25 cm alley cells (5th percentile of z) in a "
+            "0.25-1.0 m ring around each plot, neighbours excluded. Removes range-to-range drift "
+            "of a trial-wide surface (Muresk anthesis: r with the ruler 0.31 -> 0.69). Falls back "
+            "to the trial-wide surface when the ring has too few cells (cth_ground_cells = 0).\n\n"
+            "Trial-wide: the smooth exterior surface used for h_p95 / h_p99.")
+        self.ed_targets = QLineEdit(); self.ed_targets.setPlaceholderText("reference targets CSV (optional): name,E,N,height_m[,radius_m]")
+        self.ed_targets.setToolTip(
+            "Rigid targets of known height (e.g. 60 / 90 / 120 cm boards) placed in the trial for every "
+            "flight. They are measured with the same canopy-top pipeline and a per-flight correction "
+            "(offset, and scale with >=3 targets) is fitted and applied as cth_*_cal columns; "
+            "<metrics>_targets.csv and _target_calibration.json are written next to the metrics CSV.")
+        b_tg = QPushButton("..."); b_tg.setMaximumWidth(32)
+        def _pick_targets():
+            pth, _ = QFileDialog.getOpenFileName(self, "Reference targets CSV", "", "CSV (*.csv)")
+            if pth:
+                self.ed_targets.setText(pth)
+        b_tg.clicked.connect(_pick_targets)
+        cth_row.addWidget(self.cb_cth_ground, stretch=2); cth_row.addWidget(self.ed_targets, stretch=2); cth_row.addWidget(b_tg)
+
         self.cb_writelas = QCheckBox("Also write per-plot LAS files")
         self.cb_writelas.setChecked(True)
         f.addRow("Canopy height cutoff:", self.dsb_hcut)
@@ -353,6 +383,7 @@ class TraitsTab(QWidget):
         f.addRow("Biomass calibration k:", bio_row)
         f.addRow("Multi-metric biomass:", model_row)
         f.addRow("Surface models:", surf_row)
+        f.addRow("Canopy-top height:", cth_row)
         f.addRow("", self.cb_writelas)
         v.addWidget(params)
 
@@ -536,6 +567,8 @@ class TraitsTab(QWidget):
             biomass_k=self.dsb_biomass_k.value(),
             ground_mode=ground_mode, region_mode=region_mode,
             band_width=self.dsb_band.value(),
+            cth_ground=("local" if self.cb_cth_ground.currentIndex() == 0 else "exterior"),
+            targets_csv=(self.ed_targets.text().strip() or None),
         )
         self.btn_run.setEnabled(False)
         self.progress.setValue(0)

@@ -30,6 +30,7 @@ from phenoapp.ui.edit_tab           import EditTab
 from phenoapp.ui.visualize_tab      import VisualizeTab
 from phenoapp.ui.traits_tab         import TraitsTab
 from phenoapp.ui.biomass_tab        import BiomassTab
+from phenoapp.ui.spectral_tab       import SpectralTab
 from phenoapp.ui.qc_tab             import QCTab
 from phenoapp.ui.statistics_tab     import StatisticsTab
 from phenoapp.ui.guidance_tab       import GuidanceTab
@@ -60,6 +61,7 @@ class MainWindow(QMainWindow):
         self.tab_visualize = VisualizeTab()
         self.tab_traits    = TraitsTab()
         self.tab_biomass   = BiomassTab()
+        self.tab_spectral  = SpectralTab()
         self.tab_stats     = StatisticsTab()
         self.tab_guide     = GuidanceTab()
         self.tab_about     = AboutTab()
@@ -71,8 +73,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_visualize, "5. Visualize")
         self.tabs.addTab(self.tab_traits,    "6. Traits")
         self.tabs.addTab(self.tab_biomass,   "7. Biomass & Fusion")
-        self.tabs.addTab(self.tab_stats,     "8. Statistics")
-        self.tabs.addTab(self.tab_guide,     "9. Guidance")
+        self.tabs.addTab(self.tab_spectral,  "8. VNIR Spectral")
+        self.tabs.addTab(self.tab_stats,     "9. Statistics")
+        self.tabs.addTab(self.tab_guide,     "10. Guidance")
         self.tabs.addTab(self.tab_about,     "About")
 
         # When project loads, refresh the dependent tabs
