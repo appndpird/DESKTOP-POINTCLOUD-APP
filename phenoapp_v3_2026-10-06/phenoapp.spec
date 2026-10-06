@@ -15,6 +15,7 @@ hiddenimports = []
 
 datas += [("phenoapp/assets", "phenoapp/assets")]
 datas += [("phenoapp/docs",   "phenoapp/docs")]
+datas += [("phenoapp/dl",     "phenoapp/dl")]      # two-stream script run in an external torch env
 # Free/open-source LAStools subset (lasinfo/lasvalidate, LGPL) for the QC tab
 if os.path.isdir("lastools_free"):
     datas += [("lastools_free", "lastools_free")]

@@ -72,7 +72,7 @@ class AboutTab(QWidget):
         v.addLayout(h)
 
         v.addSpacing(8)
-        ver = QLabel("v3.0 (2026-10-06) — Project · QC · Generate · Edit · Visualize · Traits (LiDAR v3) · Biomass · Height Models · Biomass ML · VNIR Spectral · Statistics · Guidance")
+        ver = QLabel("v3.1 (2026-10-06) — Project · QC · Generate · Edit · Visualize · Traits (LiDAR v3) · Biomass · Height Models · Biomass ML · Deep Models · VNIR Spectral · Statistics · Guidance")
         ver.setAlignment(Qt.AlignCenter)
         ver.setStyleSheet("color: #888; padding: 6px;")
         v.addWidget(ver)

@@ -527,6 +527,23 @@ feature selection is the default (stable, honest within a trial); LOOCV gives ne
 but a noisier estimate; the real test of transfer is a held-out flight or trial, which the research scripts
 (Height Prediction Models6-10-06, Biomass methods 6-10-26) report separately.
 
+## Deep Models tab (v3.1): two-stream network for biomass and height
+
+The network (sparse 3D CNN over the plot cloud voxelised at 2 cm with height, normalised intensity and return
+number, plus a transformer over 512 cleaned VNIR pixel spectra, late fusion with a trial/stage embedding) runs
+in a separate Python environment that has torch and spconv, because PhenoApp's own environment does not.
+The tab finds such an environment automatically ("Detect automatically" probes the running interpreter and the
+conda environments on the machine), reports the GPU, and selects the device itself: CUDA when available,
+otherwise CPU, where spconv's native algorithm is used with the same weights (slower). Step 2 builds the plot
+tensors from the project LAS, VNIR cube and grid with the LiDAR v3 preprocessing and the cleaned VNIR pixels
+(dl_data/ next to the metrics CSV). Step 3 either scores every plot with the bundled pretrained ensemble (five
+fold models per target, trained on 760 plots of Muresk and AGT NUE 2025; predictions and the fold spread are
+written to <metrics>_dl_<target>_<variant>_pretrained_predictions.csv, with metrics when a ground truth was
+given) or trains and cross-validates the network on the current trial (fold weights, CV predictions and a
+JSON summary in <metrics>_dl_<target>_training). Expect the feature models to be as good or better until
+several hundred labelled plots per crop are available: on Muresk anthesis the network reached biomass R2 0.22
+against 0.35 for the fused ridge, and height 3.9 cm against 3.6 cm.
+
 ## Tips for accurate results
 
 1. **Always tick the SMRF option** for the first run on a new LAS.

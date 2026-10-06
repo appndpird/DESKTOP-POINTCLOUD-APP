@@ -33,6 +33,7 @@ from phenoapp.ui.biomass_tab        import BiomassTab
 from phenoapp.ui.spectral_tab       import SpectralTab
 from phenoapp.ui.height_tab         import HeightTab
 from phenoapp.ui.biomass_ml_tab     import BiomassMLTab
+from phenoapp.ui.deep_tab           import DeepTab
 from phenoapp.ui.qc_tab             import QCTab
 from phenoapp.ui.statistics_tab     import StatisticsTab
 from phenoapp.ui.guidance_tab       import GuidanceTab
@@ -65,6 +66,7 @@ class MainWindow(QMainWindow):
         self.tab_biomass   = BiomassTab()
         self.tab_height    = HeightTab()
         self.tab_bml       = BiomassMLTab()
+        self.tab_deep      = DeepTab()
         self.tab_spectral  = SpectralTab()
         self.tab_stats     = StatisticsTab()
         self.tab_guide     = GuidanceTab()
@@ -79,9 +81,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_biomass,   "7. Biomass & Fusion")
         self.tabs.addTab(self.tab_height,    "8. Height Models")
         self.tabs.addTab(self.tab_bml,       "9. Biomass ML")
-        self.tabs.addTab(self.tab_spectral,  "10. VNIR Spectral")
-        self.tabs.addTab(self.tab_stats,     "11. Statistics")
-        self.tabs.addTab(self.tab_guide,     "12. Guidance")
+        self.tabs.addTab(self.tab_deep,      "10. Deep Models")
+        self.tabs.addTab(self.tab_spectral,  "11. VNIR Spectral")
+        self.tabs.addTab(self.tab_stats,     "12. Statistics")
+        self.tabs.addTab(self.tab_guide,     "13. Guidance")
         self.tabs.addTab(self.tab_about,     "About")
 
         # When project loads, refresh the dependent tabs
