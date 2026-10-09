@@ -44,7 +44,11 @@ Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10
   `scripts\env\conda_setup.ps1`): Python 3.11.17, torch 2.6.0+cu124, spconv-cu124 2.3.8 (cumm-cu124 0.7.11), numpy 2.4.6,
   pandas 3.0.6, scikit-learn 1.9.1, scipy 1.17.1, laspy 2.7.0, lazrs 0.8.2, shapely 2.2.0, tifffile, pyshp, xgboost 3.2.0,
   lightgbm 4.7.0, matplotlib, openpyxl (full list: `scripts\env\phenoapp_dl_requirements.txt`). GPUs: 2 x NVIDIA TITAN Xp
-  (12 GB), driver 560.94; training runs on `cuda:1` (GPU 0 drives the desktop).
+  (12 GB, Pascal sm_61), driver 560.94; training runs on `cuda:1` (GPU 0 drives the desktop).
+  The spconv wheel ships no prebuilt kernels for sm_61, so spconv compiles them at run time with NVRTC; that needs the CUDA
+  12.4 headers and tools, installed into the env from conda-forge (`cuda-nvcc`, `cuda-cudart-dev`, `cuda-cccl`,
+  `cuda-nvrtc-dev`, `cuda-cuxxfilt`, all 12.4). cumm locates them through `nvcc` on PATH: `run_dl.ps1` prepends
+  `<env>\Library\bin` to PATH and sets `CUDA_PATH=<env>\Library`. First use of each kernel shape compiles for a few minutes.
 - Two-stream run (`scripts\env\run_dl.ps1`):
   `C:\Users\appn\miniforge3\envs\phenoapp_dl\python.exe dl_twostream.py --target biomass --epochs 100 --device cuda:1`
   then the same with `--target height`. 100 epochs per fold is the default; AdamW + OneCycle; training-time augmentation =

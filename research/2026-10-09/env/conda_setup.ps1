@@ -33,6 +33,12 @@ L "pip: torch 2.6.0 cu124 (about 2.5 GB download)"
 L "pip: spconv-cu124 2.3.8 + pipeline libraries"
 & $envpy -m pip install --no-cache-dir --disable-pip-version-check spconv-cu124==2.3.8 numpy pandas scipy scikit-learn laspy lazrs shapely tifffile pyshp matplotlib xgboost lightgbm openpyxl | Out-File $log -Append -Encoding utf8
 
+# 3b. CUDA 12.4 compiler components (conda-forge): the spconv wheel has no prebuilt kernels for Pascal (sm_61, TITAN Xp),
+#     so spconv compiles them at run time with NVRTC and needs the CUDA headers (cuda.h, cuda/std), cudart.lib, nvcc and cu++filt;
+#     cumm finds them through nvcc on PATH (run_dl.ps1 puts <env>\Library\bin on PATH and sets CUDA_PATH)
+L "conda: cuda-nvcc, cuda-cudart-dev, cuda-cccl, cuda-nvrtc-dev, cuda-cuxxfilt 12.4"
+& $conda install -y -n phenoapp_dl -c conda-forge --override-channels "cuda-nvcc=12.4" "cuda-cudart-dev=12.4" "cuda-cccl=12.4" "cuda-nvrtc-dev=12.4" "cuda-cuxxfilt=12.4" | Out-File $log -Append -Encoding utf8
+
 # 4. import test
 L "import test"
 & $envpy -c "import torch, spconv.pytorch as s, numpy, laspy, sklearn, pandas; print('torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'gpus', torch.cuda.device_count(), '| spconv', getattr(s, '__version__', 'ok'), '| numpy', numpy.__version__)" | Out-File $log -Append -Encoding utf8
