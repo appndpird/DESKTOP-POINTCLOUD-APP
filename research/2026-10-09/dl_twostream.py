@@ -23,12 +23,15 @@ from sklearn.model_selection import StratifiedKFold
 ap = argparse.ArgumentParser(); ap.add_argument("--target", default="biomass"); ap.add_argument("--epochs", type=int, default=100)
 ap.add_argument("--variants", default="two_stream,lidar_only,vnir_only"); ap.add_argument("--folds", type=int, default=10); ap.add_argument("--maxpts", type=int, default=16000)
 ap.add_argument("--device", default="cuda:0")
+ap.add_argument("--bands", default="per_plot", choices=["per_plot", "common"],
+                help="per_plot: every band usable on the plot (NaN rule) with the availability mask; common: the fixed band list usable on >= 95 %% of the plots of every reflectance flight (dataset/vnir_common_bands.csv, column common_95), identical for all flights")
 args = ap.parse_args()
+TAG = "" if args.bands == "per_plot" else "_commonbands"      # output files of the common-band run sit next to the per-plot ones
 B = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment"
 OUT = os.path.join(B, "Biomass_Height_2026-10-09", "two_stream"); DATA = os.path.join(OUT, "dl_data"); RES = os.path.join(OUT, "results"); MOD = os.path.join(OUT, "models")
 os.makedirs(RES, exist_ok=True); os.makedirs(MOD, exist_ok=True)
 dev = torch.device(args.device if torch.cuda.is_available() else "cpu"); torch.manual_seed(0); np.random.seed(0)
-t0 = time.time(); LOGF = open(os.path.join(OUT, f"dl_{args.target}.log"), "a")
+t0 = time.time(); LOGF = open(os.path.join(OUT, f"dl_{args.target}{TAG}.log"), "a")
 def log(*a):
     s = f"[{time.time()-t0:5.0f}s] " + " ".join(str(x) for x in a); print(s, flush=True); LOGF.write(s + "\n"); LOGF.flush()
 log(f"device {dev}; torch {torch.__version__}; spconv {'MISSING' if spconv is None else getattr(spconv, '__version__', 'ok')}; variants {args.variants}; epochs {args.epochs}")
@@ -41,6 +44,13 @@ log(f"target {tcol}: {len(idx)} samples; per dataset {idx.dataset.value_counts()
 wl = np.load(os.path.join(DATA, idx.file[0]))["wavelengths"]
 EXCL = np.zeros(len(wl), bool)
 for lo, hi in ((0, 415), (755, 770), (928, 962)): EXCL |= (wl >= lo) & (wl <= hi)
+COMMON = None
+if args.bands == "common":
+    cb = pd.read_csv(os.path.join(B, "Biomass_Height_2026-10-09", "dataset", "vnir_common_bands.csv")); cw = cb.wavelength_nm.to_numpy(float); cok = cb.common_95.to_numpy() == 1
+    COMMON = np.array([bool(cok[np.argmin(np.abs(cw - w))]) and abs(cw[np.argmin(np.abs(cw - w))] - w) < 0.5 for w in wl])
+    log(f"band policy: common - {int(COMMON.sum())} bands usable on >= 95 % of the plots of every reflectance flight, identical for all plots (per-plot NaN mask not used; clipped pixels still ignored)")
+else:
+    log("band policy: per_plot - every band usable on the plot (NaN rule + excluded ranges), availability mask given to the network")
 DSETS = sorted(idx.dataset.unique()); ds_id = {d: i for i, d in enumerate(DSETS)}
 
 class PlotSet(torch.utils.data.Dataset):
@@ -62,7 +72,7 @@ class PlotSet(torch.utils.data.Dataset):
         coords = np.stack([cx, cy, ch], 1).astype(np.int32)
         feats = np.stack([pts[:, 2], np.log1p(np.clip(pts[:, 3], 0, 20)), pts[:, 4] / 3.0, np.ones(len(pts), np.float32)], 1).astype(np.float32)
         # spectra: reflectance -> log -> SNV per pixel over the VALID bands only; invalid bands (band_mask 0, clipped 0, excluded) -> 0
-        valid = (pix > 0) & bmask[None, :] & ~EXCL[None, :]
+        valid = (pix > 0) & (COMMON[None, :] if COMMON is not None else (bmask[None, :] & ~EXCL[None, :]))
         sp = np.log10(np.clip(pix / 10000.0, 1e-4, None))
         nv = np.maximum(valid.sum(1, keepdims=True), 1)
         mu = (sp * valid).sum(1, keepdims=True) / nv; sd = np.sqrt(((sp - mu) ** 2 * valid).sum(1, keepdims=True) / nv) + 1e-6
@@ -146,17 +156,18 @@ for variant in args.variants.split(","):
             for coords, feats, spec, ds, y, ii in dl_te:
                 p = model(coords.to(dev), feats.to(dev), spec.to(dev), ds.to(dev), len(y)).cpu().numpy() * ysd + ymu
                 p = np.exp(p) if ylog else p; pred[ii.numpy()] = p
-        torch.save(model.state_dict(), os.path.join(MOD, f"dl_{args.target}_{variant}_fold{fold}.pt"))
+        torch.save(model.state_dict(), os.path.join(MOD, f"dl_{args.target}{TAG}_{variant}_fold{fold}.pt"))
         m = metrics(pred[te], y_all[te]); log(f"{variant} fold {fold+1}/{args.folds}: R2 {m['R2']:.3f} RMSE {m['RMSE']:.0f}  (nan preds {int(np.isnan(pred[te]).sum())})")
     for d in DSETS:
         sel = (idx.dataset == d).to_numpy(); m = metrics(pred[sel], y_all[sel])
         rows.append(dict(scheme=f"{args.folds}fold_pooled", target=tcol, variant=variant, dataset=d, n=int(sel.sum()), **m)); log(f"  {variant} {d}: R2 {m['R2']:.3f} RMSE {m['RMSE']:.1f} acc {m['accuracy']:.1f}%")
     m = metrics(pred, y_all); rows.append(dict(scheme=f"{args.folds}fold_pooled", target=tcol, variant=variant, dataset="ALL", n=len(idx), **m)); log(f"  {variant} ALL: R2 {m['R2']:.3f} RMSE {m['RMSE']:.1f}")
     preds.append(pd.DataFrame(dict(variant=variant, dataset=idx.dataset, Plot_ID=idx.Plot_ID, Plot=idx.Plot, Variety=idx.Variety, measured=y_all, predicted=pred)))
-    _merge_csv(os.path.join(RES, f"dl_{args.target}_comparison.csv"), pd.DataFrame(rows))
-    _merge_csv(os.path.join(RES, f"dl_{args.target}_per_plot_predictions.csv"), pd.concat(preds))
+    _merge_csv(os.path.join(RES, f"dl_{args.target}{TAG}_comparison.csv"), pd.DataFrame(rows).assign(band_policy=args.bands))
+    _merge_csv(os.path.join(RES, f"dl_{args.target}{TAG}_per_plot_predictions.csv"), pd.concat(preds).assign(band_policy=args.bands))
 json.dump(dict(target=tcol, epochs=args.epochs, folds=args.folds, maxpts=args.maxpts, variants_this_run=args.variants, device=str(dev), n=len(idx),
+               band_policy=args.bands, n_common_bands=(int(COMMON.sum()) if COMMON is not None else None),
                augmentation="train only: random 180-deg rotation, mirror across the row axis, 0-30 % point dropout, 1 cm xy jitter; pixel bootstrap + 0.9-1.1 brightness",
                band_policy="per-plot band_mask (vnir_band_usable) AND pixel > 0 AND not excluded; masked bands zero after SNV; availability mask appended to the embedding"),
-          open(os.path.join(RES, f"dl_{args.target}_settings.json"), "w"), indent=1)
+          open(os.path.join(RES, f"dl_{args.target}{TAG}_settings.json"), "w"), indent=1)
 log("DL DONE")
