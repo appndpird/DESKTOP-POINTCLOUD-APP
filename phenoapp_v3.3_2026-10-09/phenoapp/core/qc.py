@@ -9,8 +9,8 @@ If a LAStools bin folder is available, the genuine lasinfo64/lasvalidate64
 output appended — the paid tools (lasground, lasoverlap, ...) are NEVER
 invoked, so no license is required and no watermarking/perturbation occurs.
 
-Why not use LAStools for the traits themselves? We validated (Busselton
-fodder trial, 4 surveyed GCPs) that laspy/PDAL geometry agrees with the
+Why not use LAStools for the traits themselves? We validated (fodder trial with
+4 surveyed GCPs) that laspy/PDAL geometry agrees with the
 raw LAS to millimetres — the accuracy bottleneck is the ground model and
 the sward itself, not the point reader. LAStools' paid processing tools
 additionally perturb coordinates when unlicensed. So: free LAStools for

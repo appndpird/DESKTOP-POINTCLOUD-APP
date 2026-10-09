@@ -193,7 +193,7 @@ class IndicesPanel(QWidget):
         self.ed_excl = QLineEdit(_excl_text(DEFAULT_EXCLUDED_NM))
         self.ed_excl.setToolTip(
             "Wavelength ranges (nm) never used to build a band, e.g. '0-415, 755-770, 928-962'.\n"
-            "Defaults come from the GOBI/GRYFN cubes: the first bands (399-406 nm) carry a calibration "
+            "Defaults for GRYFN-processed cubes: the first bands (399-406 nm) carry a calibration "
             "spike, 410-500 nm is mostly clipped to 0 in canopy, 761 nm is the O2-A absorption residual "
             "and 930-960 nm the water-vapour feature. Press 'Read wavelengths' after editing.")
         f.addRow("Excluded ranges (nm):", self.ed_excl)
@@ -215,8 +215,8 @@ class IndicesPanel(QWidget):
         self.ed_search.textChanged.connect(self._filter)
         bar.addWidget(self.ed_search, stretch=1)
         b_rec = QPushButton("Recommended (biomass)"); b_rec.clicked.connect(self._select_recommended)
-        b_rec.setToolTip("Red-edge family + water and structure indices that carried biomass information on the "
-                         "2025 DPIRD trials (NDRE variants, REP, LCI, S2REP, MTCI, CIRE, OSAVI, kNDVI, NIRv, WBI...).")
+        b_rec.setToolTip("Red-edge family + water and structure indices that carried biomass information on "
+                         "pasture and wheat trials (NDRE variants, REP, LCI, S2REP, MTCI, CIRE, OSAVI, kNDVI, NIRv, WBI...).")
         b_clr = QPushButton("Clear"); b_clr.clicked.connect(lambda: self._set_all(False))
         bar.addWidget(b_rec); bar.addWidget(b_clr)
         mv.addLayout(bar)

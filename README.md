@@ -3,8 +3,8 @@
 **Current version: PhenoApp v3.3 (2026-10-09)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
 v3.3 combines the v3.2 LiDAR update (gap noise rule, 20 cm-interior gap metrics, labelled per-plot LAS with
 HeightAboveGround) and the v3.0.1 VNIR QC update (exact per-plot cubes, NaN rule for unusable bands and indices,
-flight-level reflectance check, red-clipping censoring, band QC tables), verified together on the Muresk and AGT NUE 2025
-flights. `research/2026-10-09/` holds the scripts of the 9 October rebuild of the height and biomass models (dataset build,
+flight-level reflectance check, red-clipping censoring, band QC tables), verified together on five UAV flights.
+`research/2026-10-09/` holds the scripts of the 9 October rebuild of the height and biomass models (dataset build,
 PCA feature families, two-stream tensors with per-plot band masks). Earlier trees: `phenoapp_v3_2026-10-06/` (v3.0 / v3.1),
 `phenoapp_v2/`, `phenoapp_full/`.
 

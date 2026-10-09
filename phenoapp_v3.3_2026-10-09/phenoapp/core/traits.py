@@ -60,7 +60,7 @@ TRAITS_CATALOG = [
         "Describes the upper canopy surface, so it is far less sensitive to canopy "
         "penetration (flying height, density, wind) than p95/p99 of all points."),
     ("cth_p95",     "Height", "Canopy-top P95 (cell maxima) - recommended plant height",
-        "95th percentile of the 5 cm cell maxima on the plot-local ground. Muresk NUE 2025 anthesis flight vs ruler: r 0.68, error SD 3.8 cm, slope 0.89, range drift 2.7 cm (h_p99 on the trial-wide ground: r 0.31, drift 10 cm)."),
+        "95th percentile of the 5 cm cell maxima on the plot-local ground. Validation against the ruler on an anthesis flight: r 0.68, error SD 3.8 cm, slope 0.89, range drift 2.7 cm (h_p99 on the trial-wide ground: r 0.31, drift 10 cm)."),
     ("cth_p99",     "Height", "Canopy-top P99 (cell maxima)",
         "As cth_p90 with the 99th percentile of cell maxima."),
     ("cth_max",     "Height", "Canopy-top max (cell maxima)",

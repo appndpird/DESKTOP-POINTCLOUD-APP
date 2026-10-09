@@ -11,12 +11,13 @@ VNIR stream  : 512 pixel spectra x 172 bands (reflectance, log, SNV per pixel). 
                2025-11-13) has every band masked: its spectral branch contributes nothing beyond the trial/stage embedding.
 Fusion       : concat (+ trial/stage embedding) -> MLP -> target (log-biomass, standardised).
 Variants     : two_stream, lidar_only, vnir_only.   Validation: 10-fold CV stratified by dataset.
-Usage: python dl_twostream.py [--target biomass|height] [--epochs 60] [--variants two_stream,lidar_only,vnir_only]
+Usage: python dl_twostream.py [--target biomass|height] [--epochs 100] [--variants two_stream,lidar_only,vnir_only]
+       (default 100 epochs per fold, OneCycle schedule; 10 folds x 3 variants)
 """
 import os, sys, json, time, math, argparse, numpy as np, pandas as pd, torch, torch.nn as nn, torch.nn.functional as F
 import spconv.pytorch as spconv
 from sklearn.model_selection import StratifiedKFold
-ap = argparse.ArgumentParser(); ap.add_argument("--target", default="biomass"); ap.add_argument("--epochs", type=int, default=60)
+ap = argparse.ArgumentParser(); ap.add_argument("--target", default="biomass"); ap.add_argument("--epochs", type=int, default=100)
 ap.add_argument("--variants", default="two_stream,lidar_only,vnir_only"); ap.add_argument("--folds", type=int, default=10); ap.add_argument("--maxpts", type=int, default=16000)
 ap.add_argument("--device", default="cuda:0")
 args = ap.parse_args()

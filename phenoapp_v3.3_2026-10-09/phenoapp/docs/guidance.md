@@ -158,9 +158,9 @@ canopy height model (building the CHM first if the project has none):
 Outputs next to the grid: `<grid>_refit.shp` (extra columns `plot_len`,
 `along_off`, `across_off`, `crop_len`, `refine_ok`), `<grid>_refit_report.csv`
 and `<grid>_refit_qa.png` (before/after zooms of the largest corrections). The
-Traits tab uses the refined grid from then on. On the 2025 Muresk NUE trial the
-original polygons had one end in the alley on 46 of 128 plots; after refinement
-none did. Plant heights were unchanged (r = 0.999 between grids), the sampled
+Traits tab uses the refined grid from then on. On the trial used for validation
+more than a third of the original polygons had one end in the alley; after
+refinement none did. Plant heights were unchanged (r = 0.999 between grids), the sampled
 area grew 5 % to the true sown core, and the biomass proxies' correlation with
 harvested biomass rose by 0.01 to 0.02 - a small but free gain.
 
@@ -341,7 +341,7 @@ bundled JSON, MIT licence) plus PhenoApp narrow-band extras (red-edge position
 REP, NDRE 720/790, PRI, Vogelmann, WBI...). Indices are grouped by application
 domain (vegetation, water, soil, ...) with a checkbox per index; hover an index
 for its formula, bands and reference. "Recommended (biomass)" ticks the set that
-carried biomass information on the 2025 DPIRD trials.
+carried biomass information on pasture and wheat trials.
 
 How a hyperspectral cube feeds a catalogue formula:
 
@@ -349,7 +349,7 @@ How a hyperspectral cube feeds a catalogue formula:
   band whose wavelength falls inside the catalogue's range for that band
   (e.g. N = 760-900 nm, RE1 = 695-715 nm);
 * **narrow bands** (R705, R850...) use the closest cube band;
-* **excluded ranges** are never used. Defaults for the GOBI/GRYFN cubes:
+* **excluded ranges** are never used. Defaults for GRYFN-processed cubes:
   0-415 nm (calibration spike on the first bands), 755-770 nm (O2-A residual)
   and 928-962 nm (water vapour). Edit them in the tab.
 
@@ -374,7 +374,7 @@ optionally one GeoTIFF per index over the trial extent (`index_rasters/`).
 The Biomass tab merges the CSV into the Ridge / kernel-ridge feature pool when
 the checkbox "Add the indices computed on the VNIR Spectral tab" is on.
 
-**Muresk NUE 2025-09-30 (anthesis, 128 plots) screening**, correlation with
+**Anthesis screening on a wheat trial**, correlation with
 dry biomass: REP 0.44, LCI 0.42, S2REP 0.41, NDRE-740 0.36, MTCI 0.29,
 NDRE-720 0.26, NDREI 0.23, NDVI 0.14, WBI 0.04. Red-edge position beats
 every NDVI-type index on a closed canopy.
@@ -426,7 +426,7 @@ plot-local ground instead:
 6. quality flags: `cth_cover`, `cth_ground_cells`, `cth_ground_rms`,
    `cth_ground_offset` (local minus trial-wide ground), `cth_n_noise`, `cth_ok`.
 
-Muresk NUE 2025 (128 wheat plots, ruler at maturity): on the anthesis flight
+Wheat trial, ruler heights at maturity: on the anthesis flight
 the trial-wide ground drifted 10 cm between ranges and `h_p99` reached only
 r 0.31; `cth_p95` on the plot-local ground reached r 0.68, error SD 3.8 cm,
 slope 0.89, range drift 2.7 cm, which is at the noise level of the ruler
@@ -462,7 +462,7 @@ ticked, validated leave-one-out or 5-fold:
 
 | Model | Features | When to use |
 |---|---|---|
-| Linear calibration on `cth_p95` | 1 | reporting within a trial; the reference (Muresk 2025: LOOCV 3.8 cm, at the ruler's noise floor) |
+| Linear calibration on `cth_p95` | 1 | reporting within a trial; the reference (LOOCV 3.8 cm on the validation trial, at the ruler's noise floor) |
 | Ridge, 7 structure features | cth_p95, tip thinness, cth_cover, cover_frac, roughness, vertical spread, point density | best within a flight by 0.1-0.4 cm; does not transfer |
 | Random forest, 7 structure features | same | the model to carry to another date or trial (5.3 cm raw, 4.9 cm with a per-flight offset) |
 | XGBoost, 7 structure features, monotone in cth_p95 | same | alternative boosted model (needs the xgboost package) |
@@ -516,7 +516,7 @@ be left out of any analysis or model, never filled.
 
 **Height Models tab** gained the v3 sets: LiDAR core (21 canopy features) and LiDAR + VNIR (43 features) with PLS,
 ridge, Gaussian process and random forest, each with random-forest top-10 feature selection inside every training
-fold, and repeated 10-fold (5x) validation as the default. Muresk NUE 2025: anthesis R2 0.50-0.51 / RMSE 3.6 cm;
+fold, and repeated 10-fold (5x) validation as the default. On the validation trial: anthesis R2 0.50-0.51 / RMSE 3.6 cm;
 maturity LiDAR+VNIR R2 0.48 / 3.7 cm against 0.25 / 4.4 cm for the single cth_p95 calibration.
 
 **Biomass ML tab (new).** Fused LiDAR v3 + VNIR v3 features (plus CHM-weighted indices: index x cover, index x H95,
@@ -539,7 +539,7 @@ default), `none`, `legacy` (the canopy-top filter: SOR on the top 10 % of points
 (k=10 on all points at 3 sd, the v3.0 default, or 5 sd). Flagged points are kept and marked unless "Drop flagged noise
 points" is ticked; every metric ignores them either way.
 
-Why the default changed: on the Muresk NUE 2025-09-30 flight (128 plots, 30,000 pts/m2, single-return Ouster) the gap
+Why the default changed: on the validation flight (30,000 pts/m2, single-return Ouster) the gap
 rule flagged a single point in the whole trial, while every statistical-outlier variant removed sparse canopy tips (heads
 and awns): 0.3 % of points at 5 sd, 1.5 % at 3 sd, about half of them in the top 5 % of the canopy. Against the ruler
 heights the canopy-top P95 scored r 0.70 / LOOCV RMSE 3.70 cm unfiltered, 0.69 / 3.76 cm with the legacy filter, 0.68 /
@@ -548,7 +548,7 @@ sparse, and in a cereal canopy that is the top. Use an SOR only for clouds with 
 apply it below the 90th height percentile.
 
 **Interior gap metrics.** The refit plot polygons include 10-20 cm of alley soil along the long sides, and the laser also
-sees soil in inter-row gaps and thin patches. On Muresk 2025-09-30, 68 % of the ground returns sat within 20 cm of the
+sees soil in inter-row gaps and thin patches. On the validation flight 68 % of the ground returns sat within 20 cm of the
 polygon edge: whole-polygon Pgap 8.3 % against 3.5 % on the interior. The v3 features therefore add, on the 20 cm-trimmed
 interior, `Pgap_interior`, `LAI_proxy_interior` (= -ln(Pgap_interior)/0.5), `cover_2cm_interior` (share of 2 cm cells
 with a canopy point) and `ground_visible_2cm_interior` (share of 2 cm cells with a ground return), plus `cover_2cm`,
@@ -574,11 +574,11 @@ conda environments on the machine), reports the GPU, and selects the device itse
 otherwise CPU, where spconv's native algorithm is used with the same weights (slower). Step 2 builds the plot
 tensors from the project LAS, VNIR cube and grid with the LiDAR v3 preprocessing and the cleaned VNIR pixels
 (dl_data/ next to the metrics CSV). Step 3 either scores every plot with the bundled pretrained ensemble (five
-fold models per target, trained on 760 plots of Muresk and AGT NUE 2025; predictions and the fold spread are
+fold models per target, trained on wheat plots at anthesis and maturity; predictions and the fold spread are
 written to <metrics>_dl_<target>_<variant>_pretrained_predictions.csv, with metrics when a ground truth was
 given) or trains and cross-validates the network on the current trial (fold weights, CV predictions and a
 JSON summary in <metrics>_dl_<target>_training). Expect the feature models to be as good or better until
-several hundred labelled plots per crop are available: on Muresk anthesis the network reached biomass R2 0.22
+several hundred labelled plots per crop are available: on the validation trial the network reached biomass R2 0.22
 against 0.35 for the fused ridge, and height 3.9 cm against 3.6 cm.
 
 ## Tips for accurate results

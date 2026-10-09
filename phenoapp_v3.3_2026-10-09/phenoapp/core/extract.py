@@ -165,7 +165,7 @@ def extract_all_plots(
                 gm = fit_exterior_ground(x, y, z, plots)
             except Exception:
                 gm = None
-        # 'exterior' = trial-wide smooth surface (validated best on Muresk 2025);
+        # 'exterior' = trial-wide smooth surface (validated best for dense canopies);
         # 'local' = per-plot alley ring plane (fallback trial-wide)
         ct = canopy_top_all(x, y, z, plots.reset_index(drop=True), ext_ground_model=gm,
                             use_ring=(cth_ground == "local"),

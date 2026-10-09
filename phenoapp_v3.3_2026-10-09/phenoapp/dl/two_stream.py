@@ -140,7 +140,7 @@ def main():
     idx = pd.read_csv(os.path.join(a.data, "index.csv")); tcol = "biomass_kg_ha" if a.target == "biomass" else "height_cm"
     wl = np.load(os.path.join(a.data, idx.file.iloc[0]))["wavelengths"]; excl = np.zeros(len(wl), bool)
     for lo, hi in ((0, 415), (755, 770), (928, 962)): excl |= (wl >= lo) & (wl <= hi)
-    TRAIN_DSETS = ["agt_anthesis", "agt_maturity", "muresk_anthesis", "muresk_maturity"]     # embedding ids of the pretrained models
+    TRAIN_DSETS = ["trial_b_anthesis", "trial_b_maturity", "trial_a_anthesis", "trial_a_maturity"]     # embedding ids of the bundled pretrained models (two trials x two stages, sorted)
     rng = np.random.default_rng(0); ylog = a.target == "biomass"
     if a.mode == "predict":
         files = sorted([f for f in os.listdir(a.weights) if f.startswith(f"two_stream_{a.target}_fold") and f.endswith(".pt")]) if a.variant == "two_stream" else \
@@ -154,7 +154,7 @@ def main():
         preds = np.zeros((len(files), len(idx)))
         for k, f in enumerate(files):
             sd = torch.load(os.path.join(a.weights, f), map_location="cpu"); nds = int(sd["ds_emb.weight"].shape[0])
-            if nds == 2:   # Muresk-only models: embedding 0 = anthesis, 1 = maturity
+            if nds == 2:   # single-trial models: embedding 0 = anthesis, 1 = maturity
                 ds_id = {d: (1 if "mat" in str(d).lower() else 0) for d in idx.dataset.unique()}
             model = build(a.variant, nds, dev)
             model.load_state_dict({n: (t.float() if t.is_floating_point() else t) for n, t in sd.items()}); model.eval()

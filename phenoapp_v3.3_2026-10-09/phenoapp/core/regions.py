@@ -1,7 +1,7 @@
 """
 Plot sampling regions.
 
-Validated on the 2025 DPIRD Fodder trials: computing plot statistics over
+Validated on dense pasture trials: computing plot statistics over
 the CENTRAL BAND of each plot (matching where the ground-truth mower strip
 is cut, and clear of edge effects / neighbour overhang) consistently beats
 whole-plot means for both LiDAR and spectral biomass models. Cherry-picking

@@ -5,7 +5,7 @@ pixels) for plot biomass and plant height.
   1. Compute environment: PhenoApp finds a Python environment with torch (and spconv); GPU is used
      automatically when CUDA is available, otherwise CPU.
   2. Prepare plot tensors from the project LAS + VNIR cube + grid (LiDAR v3 preprocessing, cleaned VNIR).
-  3. Predict with the bundled pretrained fold ensemble (trained on Muresk + AGT NUE 2025), or
+  3. Predict with the bundled pretrained fold ensemble (wheat, anthesis and maturity flights), or
   4. Train / cross-validate the network on this trial's ground truth.
 """
 
@@ -63,8 +63,8 @@ class DeepTab(QWidget):
     def _build_ui(self):
         v = QVBoxLayout(self)
         v.addWidget(QLabel("<h2>Deep models: two-stream network (sparse 3D CNN + spectral transformer)</h2>"))
-        v.addWidget(QLabel("Pretrained on 760 plots (Muresk and AGT NUE 2025, anthesis and maturity). Within a trial the feature models of the Height Models / Biomass ML tabs "
-                           "were as good or better (biomass R² 0.22 vs 0.35 on Muresk anthesis; height 3.9 vs 3.6 cm); use this tab to score a new flight with the ensemble "
+        v.addWidget(QLabel("Pretrained fold ensemble (wheat plots, anthesis and maturity flights). Within a trial the feature models of the Height Models / Biomass ML tabs "
+                           "were as good or better; use this tab to score a new flight with the ensemble "
                            "or to retrain once several hundred labelled plots are available. The GPU is used automatically when CUDA is available."))
         g = QGroupBox("1. Compute environment"); f = QFormLayout(g)
         row = QHBoxLayout(); self.cb_env = QComboBox(); self.cb_env.setEditable(True); self.cb_env.addItems(find_torch_pythons())

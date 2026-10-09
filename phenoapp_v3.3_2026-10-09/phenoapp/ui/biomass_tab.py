@@ -13,7 +13,7 @@ Workflow:
   5. Predictions for every plot are written next to the metrics CSV; models
      are saved as JSON for reuse on another flight of the same trial.
 
-Reading the results (validated on the 2025 DPIRD Fodder trials):
+Reading the results:
   * Fresh biomass is the primary sensor product. On dense multi-species
     pasture expect VNIR (NDRE/PLS) >> LiDAR height; fusion adds little.
   * DM% comes from the 970 nm water feature (WBI / PLS).
@@ -251,10 +251,10 @@ class BiomassTab(QWidget):
         mod_row.addStretch()
         self.cb_mod_lidar.setToolTip(
             "Height/cover/volume models from the point cloud. Best on "
-            "short, sparse or row-structured swards (e.g. Warner Glen).")
+            "short, sparse or row-structured swards.")
         self.cb_mod_vnir.setToolTip(
             "Spectral models (NDRE, water indices, full-spectrum PLS). "
-            "Best on dense closed swards (e.g. Busselton); also the only "
+            "Best on dense closed swards; also the only "
             "route to DM%.")
         self.cb_mod_fusion.setToolTip(
             "Models that may combine both sensors, incl. ridge and kernel-"

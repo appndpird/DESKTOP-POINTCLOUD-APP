@@ -1,8 +1,7 @@
 """
 Plant-height models: per-plot LiDAR features -> measured plant height.
 
-Validated on Muresk NUE 25NO43 (128 wheat plots, two flights, ruler at maturity;
-see Height Prediction Models/ANALYSIS.md):
+Validated on a wheat trial (two flights, ruler heights at maturity):
 
   cal_linear  : ruler = a + b x cth_p95.  Within a trial this is at the noise
                 floor of the ruler (LOOCV 3.8 cm); the reference model.
@@ -40,10 +39,10 @@ HEIGHT_MODELS = {
     "struct_rf":    ("Random forest on 7 canopy-structure features (transfers between dates)", STRUCT_FEATURES, "rf"),
     "struct_xgb":   ("XGBoost on 7 canopy-structure features, monotone in cth_p95", STRUCT_FEATURES, "xgb"),
     # v3 (2026-10-06): canopy-only LiDAR360-style features, nested top-10 selection inside each fold
-    "lidar_v3_pls":   ("v3 LiDAR core (22 canopy features, v3.2 interior gap metrics) - PLS, nested selection  [Muresk anthesis R2 0.50, 3.6 cm]", LIDAR_V3_CORE, "pls_sel"),
+    "lidar_v3_pls":   ("v3 LiDAR core (22 canopy features, v3.2 interior gap metrics) - PLS, nested selection", LIDAR_V3_CORE, "pls_sel"),
     "lidar_v3_ridge": ("v3 LiDAR core - Ridge, nested selection", LIDAR_V3_CORE, "ridge_sel"),
     "lidar_v3_gpr":   ("v3 LiDAR core - Gaussian process (best date-to-date transfer with a target offset)", LIDAR_V3_CORE, "gpr_sel"),
-    "fused_v3_pls":   ("v3 LiDAR + VNIR (43 features) - PLS, nested selection  [Muresk maturity R2 0.48 vs 0.25 LiDAR only]", LIDAR_V3_CORE + VNIR_V3_CORE, "pls_sel"),
+    "fused_v3_pls":   ("v3 LiDAR + VNIR (43 features) - PLS, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE, "pls_sel"),
     "fused_v3_ridge": ("v3 LiDAR + VNIR - Ridge, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE, "ridge_sel"),
     "fused_v3_rf":    ("v3 LiDAR + VNIR - Random forest, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE, "rf_sel"),
 }

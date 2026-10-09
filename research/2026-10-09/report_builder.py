@@ -143,24 +143,26 @@ for lab, folder in (("height", HP), ("biomass", BM)):
     if os.path.exists(pcf):
         html += [f"<h3>Principal components kept per block ({lab} models, fitted on all plots for reference)</h3>", table_html(pd.read_csv(pcf), "{:.3f}")]
 if H is not None:
-    html += ["<h2>2. Plant height (Muresk, ruler at maturity, n = 128 per flight)</h2>", img("h_bar"), "<h3>Best model per feature family (held-out predictions, repeated 10-fold)</h3>", table_html(H),
+    html += ["<h2>3. Plant height (Muresk, ruler at maturity, n = 128 per flight)</h2>", img("h_bar"), "<h3>Best model per feature family (held-out predictions, repeated 10-fold)</h3>", table_html(H),
              img("h_2025-09-30"), img("h_2025-11-21"), "<h3>Leave-one-out for the top models and the cth_p95 reference</h3>", table_html(Rl),
              "<h3>Transfer between dates (train one flight, test the other): RMSE cm</h3>", table_html(Rt.reset_index()), "<h3>Which features matter</h3>", img("h_imp"), "<h3>All height models</h3>", table_html(full_h)]
 else:
-    html += ["<h2>2. Plant height</h2><p>not run</p>"]
+    html += ["<h2>3. Plant height</h2><p>not run</p>"]
 if Bt is not None:
-    html += ["<h2>3. Above-ground biomass (kg/ha, dry)</h2>", img("b_bar"), "<h3>Best model per feature family and dataset (repeated 10-fold)</h3>", table_html(Bt),
+    html += ["<h2>4. Above-ground biomass (kg/ha, dry)</h2>", img("b_bar"), "<h3>Best model per feature family and dataset (repeated 10-fold)</h3>", table_html(Bt),
              ("<p class='small'>Families not run: " + "; ".join(f"{r.dataset} {r.feature_set} ({r.reason})" for _, r in skipped.iterrows()) + "</p>") if skipped is not None and len(skipped) else "",
              "".join(img(f"b_{ds}") for ds in DSETS), "<h3>Top features (random-forest importance on all features, per dataset)</h3>", img("b_imp"),
              "<h3>Pooled model across trials and stages (grouped 10-fold), R² per dataset</h3>", table_html(pooled.reset_index()),
              "<h3>Cross-trial transfer (train one trial, test the other, same stage)</h3>", table_html(cross)]
 else:
-    html += ["<h2>3. Above-ground biomass</h2><p>not run</p>"]
-html += ["<h2>4. Two-stream deep network (sparse 3D CNN on the classified plot cloud + spectral transformer on VNIR pixels, late fusion)</h2>",
-         "<p>Inputs from the same dataset; the spectral stream never sees an unusable band (per-plot band mask from the NaN rule, clipped pixels and excluded ranges are masked and the availability mask is given to the network). 10-fold CV stratified by dataset. The pooled R² is inflated by the between-dataset differences in mean biomass; the per-dataset rows are the comparable numbers.</p>",
+    html += ["<h2>4. Above-ground biomass</h2><p>not run</p>"]
+html += ["<h2>5. Two-stream deep network (sparse 3D CNN on the classified plot cloud + spectral transformer on VNIR pixels, late fusion)</h2>",
+         "<p>Inputs from the same dataset; the spectral stream never sees an unusable band (per-plot band mask from the NaN rule, clipped pixels and excluded ranges are masked and the availability mask is given to the network). 10-fold CV stratified by dataset, 100 epochs per fold (AdamW, OneCycle schedule, log-biomass target). "
+         "Training-time data augmentation, applied on the fly to every training plot: point cloud randomly rotated by 180° and mirrored across the row axis, 0-30 % of the points dropped at random, 1 cm xy jitter; spectral pixels bootstrap-resampled within the plot and scaled by a random brightness factor of 0.9-1.1. "
+         "Nothing is augmented at test time, and the feature-based models use no augmentation (their regularisation is the nested selection, PCA and the ridge / PLS penalties). The pooled R² is inflated by the between-dataset differences in mean biomass; the per-dataset rows are the comparable numbers.</p>",
          img("b_dl"), img("b_dl2"), table_html(dl_rows) if dl_rows is not None else "<p>not run (torch / spconv unavailable at build time)</p>",
          ("<h3>Same network for height (Muresk)</h3>" + table_html(DLH)) if DLH is not None else "",
-         "<h2>5. Files</h2><p class='small'>Everything is under Biomass Experiment\\Biomass_Height_2026-10-09: dataset\\ (per trial / flight: ground_truth.csv, features_lidar.csv, features_vnir.csv, vnir_spectra.csv, vnir_band_usable.csv, features_all.csv, lidar_classified\\, vnir\\), "
+         "<h2>6. Files</h2><p class='small'>Everything is under Biomass Experiment\\Biomass_Height_2026-10-09: dataset\\ (per trial / flight: ground_truth.csv, features_lidar.csv, features_vnir.csv, vnir_spectra.csv, vnir_band_usable.csv, features_all.csv, lidar_classified\\, vnir\\), "
          "height\\ and biomass\\ (results\\, models\\), two_stream\\ (dl_data\\, results\\, models\\), figures\\, scripts\\ (build_dataset.py, dl_prepare.py, height_models.py, biomass_models.py, pca_families.py, dl_twostream.py, report_builder.py, grid_pyshp.py, vnir_envi.py) and README.md.</p>"]
 page = "\n".join(html)
 out = os.path.join(M, "REPORT_height_biomass_2026-10-09.html"); open(out, "w", encoding="utf-8").write(page)

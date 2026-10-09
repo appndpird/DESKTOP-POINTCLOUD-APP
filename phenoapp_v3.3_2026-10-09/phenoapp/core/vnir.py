@@ -4,7 +4,7 @@ VNIR / hyperspectral orthomosaic support (ENVI .bin/.hdr cubes).
 Provides per-plot spectral indices and mean spectra for biomass / dry-matter
 modelling, sampled over the same plot regions as the LiDAR traits.
 
-Index cheat-sheet (validated on the 2025 DPIRD Fodder trials):
+Index cheat-sheet (validated on dense pasture):
   NDRE  (R800-R740)/(R800+R740) : best single fresh-biomass predictor on
                                   dense pasture (red band of NDVI saturates).
                                   NOTE: this is the 740/800 nm variant, not the
@@ -306,7 +306,7 @@ class VNIRCube:
                         sub = band[sp["r0"]:sp["r0"] + sp["h"], sp["c0"]:sp["c0"] + sp["w"]]
                         if sub.shape != sp["inside"].shape:
                             # the union read came back short on its last row/column (rounding at the edge of the
-                            # union window; seen on AGT 2025-11-13 flight 2, plots 1001/1024): read this plot's own
+                            # union window; seen on two plots of one flight): read this plot's own
                             # window straight from the cube instead of zero-padding, so no polygon pixel is lost
                             sub = src.read(b, window=Window(sp["c0"] + u_c0, sp["r0"] + u_r0, sp["w"], sp["h"]),
                                            boundless=True, fill_value=0)

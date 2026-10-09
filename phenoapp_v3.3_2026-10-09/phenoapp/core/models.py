@@ -2,7 +2,7 @@
 Biomass & dry-matter models: LiDAR, VNIR, and fusion — with honest
 leave-one-out cross-validation.
 
-Design decisions (validated on the 2025 DPIRD Fodder trials, Busselton):
+Design decisions (validated on dense pasture trials):
 
 * All calibrations include an INTERCEPT. The zero-intercept `PVI x k`
   model cross-validates below no-skill on dense pasture, because short

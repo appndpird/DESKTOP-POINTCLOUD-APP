@@ -14,7 +14,8 @@ Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10
   3. `height_models.py`   Muresk plant height, LiDAR core / all / + VNIR, nested repeated 10-fold, LOOCV, flight transfer
   4. `biomass_models.py`  biomass per dataset (Muresk anthesis / maturity, AGT anthesis / maturity), LiDAR_core / VNIR_core /
                           Fused_core / Fused_all, pooled and cross-trial
-  5. `dl_twostream.py`    two-stream network (sparse 3D CNN + spectral transformer), 10-fold - NOT RUN HERE (see below)
+  5. `dl_twostream.py`    two-stream network (sparse 3D CNN + spectral transformer), 10-fold, 100 epochs per fold,
+                          on-the-fly augmentation - NOT RUN HERE (see below)
   6. `report_builder.py`  figures + `REPORT_height_biomass_2026-10-09.html`
   helpers: `grid_pyshp.py` (shapefile reader without fiona), `vnir_envi.py` (ENVI cube reader without rasterio)
 - `height\`       results\ (model_comparison.csv, per_plot_predictions.csv, best_models.csv, feature sets, RF importances), models\ (joblib)
@@ -39,4 +40,8 @@ Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10
 - An application-control policy blocks the DLLs of fiona, pyogrio, rasterio and torch, so: shapefiles are read with pyshp,
   ENVI cubes with numpy memmap, per-plot GeoTIFFs with tifffile; per-plot cubes are copied (verified) rather than rewritten;
   the two-stream network could not be trained (torch DLLs blocked, no spconv wheel) - run `dl_twostream.py` in the
-  soilnet environment on the GPU machine with `two_stream\dl_data` as input.
+  soilnet environment on the GPU machine with `two_stream\dl_data` as input:
+  `python dl_twostream.py --target biomass --epochs 100` and `python dl_twostream.py --target height --epochs 100`
+  (100 epochs per fold is the default; AdamW + OneCycle; training-time augmentation = random 180-degree rotation,
+  mirror across the row axis, 0-30 % point dropout, 1 cm xy jitter, bootstrap resampling of the plot pixels and a
+  0.9-1.1 brightness factor; no augmentation at test time). Then rerun `report_builder.py` to add section 5.

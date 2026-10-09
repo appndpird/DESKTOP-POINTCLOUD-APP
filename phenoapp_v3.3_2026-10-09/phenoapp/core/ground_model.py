@@ -1,7 +1,7 @@
 """
 Exterior ground-surface model.
 
-Motivation (validated on the 2025 DPIRD Fodder trials): with single-return
+Motivation (validated on dense pasture trials): with single-return
 LiDAR over a dense, closed sward the laser almost never reaches the soil
 inside plots. Ground classifiers that look for the lowest local surface
 (SMRF, per-plot p1-of-Z) therefore ride along the *canopy bottom*, which
@@ -11,7 +11,7 @@ invert biomass relationships entirely.
 The robust alternative implemented here: take ground observations ONLY from
 the exterior of the plot polygons (mowed alleys, tracks, bare surrounds,
 where the laser genuinely sees soil), then fit a smooth low-order surface
-and evaluate it underneath the plots. On the Busselton fodder trial this
+and evaluate it underneath the plots. On a dense fodder trial this
 doubled the LiDAR fresh-biomass LOOCV R^2 (0.13 -> 0.25) versus the vendor
 DTM, while an SMRF ground flipped it negative.
 

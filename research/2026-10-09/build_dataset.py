@@ -111,16 +111,21 @@ def run_flight(fl):
     # -------- VNIR (v3.0.1: per-plot cubes regenerated + cleaned features with the NaN rule) --------
     cube = VNIRCube(fl["cube"]); wl = np.asarray(cube.wavelengths, float)
     regions = [plot_region(g, mode="whole", band_width=0.5) for g in plots.geometry]
-    V, SP, VF = vnir_features_all(cube, plots, regions, progress_cb=lambda p, m: (log(f"    vnir {p}% {m}") if p in (50, 100) else None))
-    V["Plot_ID"] = V["Plot_ID"].astype(int); SP["Plot_ID"] = SP["Plot_ID"].astype(int); VF["Plot_ID"] = VF["Plot_ID"].astype(int)
-    wcols = [c for c in VF.columns if c != "Plot_ID"]
-    refl_ok = bool(int(V.vnir_reflectance_ok.iloc[0]))
-    BU = pd.DataFrame(band_usable(wl, VF[wcols].values, refl_ok, V.frac_in_cube.values), columns=wcols)
-    BU.insert(0, "Plot_ID", V["Plot_ID"].values); BU.insert(1, "cube_reflectance_ok", int(refl_ok)); BU.insert(2, "n_usable_bands", BU[wcols].sum(axis=1).values)
-    V.to_csv(os.path.join(fdir, "features_vnir.csv"), index=False); SP.to_csv(os.path.join(fdir, "vnir_spectra.csv"), index=False)
-    VF.to_csv(os.path.join(fdir, "vnir_band_valid_fraction.csv"), index=False); BU.to_csv(os.path.join(fdir, "vnir_band_usable.csv"), index=False)
-    log(f"  VNIR features {V.shape}; reflectance_ok {refl_ok}; vnir_qc_ok {int(V.vnir_qc_ok.sum())}/{len(V)}; red_ok {int(V.red_ok.sum())}/{len(V)}; "
-        f"usable band cells {100*BU[wcols].to_numpy().mean():.1f}%")
+    vfe = os.path.join(fdir, "features_vnir.csv")
+    if os.path.exists(vfe) and "--redo-vnir-features" not in sys.argv:
+        V = pd.read_csv(vfe); SP = pd.read_csv(os.path.join(fdir, "vnir_spectra.csv")); VF = pd.read_csv(os.path.join(fdir, "vnir_band_valid_fraction.csv")); BU = pd.read_csv(os.path.join(fdir, "vnir_band_usable.csv"))
+        wcols = [c for c in VF.columns if c != "Plot_ID"]; refl_ok = bool(int(V.vnir_reflectance_ok.iloc[0])); log(f"  VNIR features reused ({V.shape})")
+    else:
+        V, SP, VF = vnir_features_all(cube, plots, regions, progress_cb=lambda p, m: (log(f"    vnir {p}% {m}") if p in (50, 100) else None))
+        V["Plot_ID"] = V["Plot_ID"].astype(int); SP["Plot_ID"] = SP["Plot_ID"].astype(int); VF["Plot_ID"] = VF["Plot_ID"].astype(int)
+        wcols = [c for c in VF.columns if c != "Plot_ID"]
+        refl_ok = bool(int(V.vnir_reflectance_ok.iloc[0]))
+        BU = pd.DataFrame(band_usable(wl, VF[wcols].values, refl_ok, V.frac_in_cube.values), columns=wcols)
+        BU.insert(0, "Plot_ID", V["Plot_ID"].values); BU.insert(1, "cube_reflectance_ok", int(refl_ok)); BU.insert(2, "n_usable_bands", BU[wcols].sum(axis=1).values)
+        V.to_csv(vfe, index=False); SP.to_csv(os.path.join(fdir, "vnir_spectra.csv"), index=False)
+        VF.to_csv(os.path.join(fdir, "vnir_band_valid_fraction.csv"), index=False); BU.to_csv(os.path.join(fdir, "vnir_band_usable.csv"), index=False)
+        log(f"  VNIR features {V.shape}; reflectance_ok {refl_ok}; vnir_qc_ok {int(V.vnir_qc_ok.sum())}/{len(V)}; red_ok {int(V.red_ok.sum())}/{len(V)}; "
+            f"usable band cells {100*BU[wcols].to_numpy().mean():.1f}%")
     # per-plot VNIR cubes: the GeoTIFF writer needs GDAL (blocked here), so the per-plot files verified against the
     # orthomosaic with ENVI on 8-9 Oct 2026 (pixel-exact in all 172 bands) are copied from the existing datasets
     vdir = os.path.join(fdir, "vnir"); os.makedirs(vdir, exist_ok=True); src_dir = VERIFIED_CUBES[fl["key"]]

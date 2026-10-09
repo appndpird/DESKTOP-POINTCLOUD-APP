@@ -71,7 +71,7 @@ def _asset_dir() -> str:
 
 
 # Default wavelength ranges (nm) that are never used to build a band.
-# Validated on the Muresk 2025 GOBI cubes: the first three bands (399-406 nm)
+# Validated on GRYFN-processed VNIR cubes: the first three bands (399-406 nm)
 # carry a calibration spike, 410-500 nm is mostly clipped to 0 in canopy,
 # 761 nm is the O2-A absorption residual and 930-960 nm the water-vapour
 # feature. Users can edit the list in the tab.
@@ -108,7 +108,7 @@ def band_usable(wl, valid_frac, reflectance_ok=True, frac_in_cube=None, excluded
 _EXTRA = [
     dict(acronym="NDRE740", name="Normalised Difference Red Edge (740/800, PhenoApp legacy 'NDRE')",
          formula="(R800 - R740) / (R800 + R740)", bands=["R800", "R740"], domain="hyperspectral narrow-band",
-         reference="PhenoApp v2 (validated on the 2025 DPIRD Fodder trials); Gitelson & Merzlyak (1994) form with 740 nm"),
+         reference="PhenoApp v2 (validated on dense pasture); Gitelson & Merzlyak (1994) form with 740 nm"),
     dict(acronym="NDRE720", name="Normalised Difference Red Edge (720/790, Barnes et al. 2000)",
          formula="(R790 - R720) / (R790 + R720)", bands=["R790", "R720"], domain="hyperspectral narrow-band",
          reference="Barnes, E.M. et al. (2000) Coincident detection of crop water stress, nitrogen status and canopy "
@@ -146,8 +146,7 @@ _EXTRA = [
          reference="PhenoApp v2 (matches the Biomass-tab NDVI column)"),
 ]
 
-# Preset: indices that carried biomass information on the 2025 DPIRD trials
-# (Fodder pastures + Muresk NUE wheat) - red-edge family first.
+# Preset: indices that carried biomass information on pasture and wheat trials - red-edge family first.
 RECOMMENDED_BIOMASS = ["NDRE740", "NDRE720", "REP", "S2REP", "LCI", "MTCI", "NDREI", "CIRE", "CIre705", "VOG1",
                        "NDVI_nb", "OSAVI", "SAVI", "GNDVI", "kNDVI", "NIRv", "WDRVI", "MCARI", "TCARI", "TCARIOSAVI",
                        "mND705", "PRI", "WBI", "NDWI970"]

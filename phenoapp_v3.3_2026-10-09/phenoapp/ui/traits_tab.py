@@ -361,7 +361,7 @@ class TraitsTab(QWidget):
             "Ground reference for the canopy-top heights (cth_p90 etc.).\n\n"
             "Plot-local: a robust plane through 25 cm alley cells (5th percentile of z) in a "
             "0.25-1.0 m ring around each plot, neighbours excluded. Removes range-to-range drift "
-            "of a trial-wide surface (Muresk anthesis: r with the ruler 0.31 -> 0.69). Falls back "
+            "of a trial-wide surface (ruler agreement r 0.31 -> 0.69). Falls back "
             "to the trial-wide surface when the ring has too few cells (cth_ground_cells = 0).\n\n"
             "Trial-wide: the smooth exterior surface used for h_p95 / h_p99.")
         self.ed_targets = QLineEdit(); self.ed_targets.setPlaceholderText("reference targets CSV (optional): name,E,N,height_m[,radius_m]")
@@ -385,10 +385,10 @@ class TraitsTab(QWidget):
             "ground plane from the alley ring refined with in-plot points (class 2, |h| <= 8 cm), canopy = h > 10 cm (class 5). "
             "Canopy-only metrics H50/H95/H99/H99.9/top-N mean, cover on a 5 cm grid, voxel canopy volume, gap fraction and "
             "20 cm gap layers, LAI proxy, 3D profile area, canopy-top P90/P95/P99, rumple, roughness, return and normalised "
-            "intensity metrics (Muresk 2025: height R2 0.50 / RMSE 3.6 cm; normalised canopy intensity is the best anthesis "
+            "intensity metrics (normalised canopy intensity is the strongest single anthesis "
             "biomass correlate). v3.2 adds the gap metrics on the 20 cm interior of each plot (Pgap_interior, LAI_proxy_interior, "
             "cover_2cm_interior, ground_visible_2cm_interior): refit polygons include alley soil along the long sides, which "
-            "inflates whole-polygon Pgap (Muresk anthesis: 8.3 % whole vs 3.5 % interior). Columns are added to the metrics CSV "
+            "inflates whole-polygon Pgap (typically 2-3x the interior value). Columns are added to the metrics CSV "
             "(duplicates get a _v3 suffix) and written to <metrics>_lidar_v3.csv.")
         self.cb_noise_rule = QComboBox()
         self.cb_noise_rule.addItems([
@@ -400,7 +400,7 @@ class TraitsTab(QWidget):
         ])
         self.cb_noise_rule.setToolTip(
             "Which points are flagged as noise (class 7) before classification and features.\n\n"
-            "Validated on Muresk NUE 2025-09-30 (128 plots, ruler heights): the gap rule flagged a single point in the trial; "
+            "Validated against ruler heights: the gap rule flagged a single point in a whole trial; "
             "every statistical-outlier variant removed sparse canopy tips (heads / awns; 0.3-1.5 % of points, half of them in "
             "the top 5 % of the canopy) and lowered the ruler agreement of cth_p95 (r 0.70 / LOOCV 3.70 cm unfiltered, "
             "0.68 / 3.79 cm at 5 sd, 0.66 / 3.88 cm at 3 sd). Flagged points are kept and marked unless the box below is ticked.")

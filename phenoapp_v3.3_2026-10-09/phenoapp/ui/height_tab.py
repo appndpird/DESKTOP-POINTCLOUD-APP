@@ -98,8 +98,8 @@ class HeightTab(QWidget):
         v.addWidget(QLabel(
             "Uses the per-plot metrics of the Traits tab (compute the canopy-top cth_* heights, cover fraction, roughness, "
             "point density and the percentile heights first). Fits the chosen models to measured plant height, validates them "
-            "with every plot held out, and saves predictions and models to disk. On Muresk NUE 2025 the linear calibration on "
-            "cth_p95 was already at the ruler's noise floor (3.8 cm); the random forest is the one to carry to another date."))
+            "with every plot held out, and saves predictions and models to disk. Within a trial the linear calibration on "
+            "cth_p95 is usually already at the ruler's noise floor; the random forest is the one to carry to another date."))
 
         g = QGroupBox("Inputs"); f = QFormLayout(g)
         row = QHBoxLayout(); self.ed_metrics = QLineEdit()

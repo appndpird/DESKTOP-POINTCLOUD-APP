@@ -2,17 +2,16 @@
 
 **v3.3 (2026-10-09) - combined release:** the v3.2 LiDAR update (noise rule, interior gap metrics, labelled per-plot LAS)
 and the v3.0.1 VNIR QC update (exact per-plot cubes, NaN rule for unusable bands and indices, flight-level reflectance
-check, red-clipping censoring, band QC tables) in one tree, verified together on Muresk NUE 2025 (both flights) and
-AGT NUE 2025 (three flights): every per-plot VNIR cube pixel-exact against its orthomosaic, LiDAR features identical to
-the labelled-plot run. Research pipeline used for the 9 October rebuild of the height and biomass models (dataset build
+check, red-clipping censoring, band QC tables) in one tree, verified on five UAV flights: every per-plot VNIR cube pixel-exact against its orthomosaic, LiDAR features
+identical to the labelled-plot run. Research pipeline used for the 9 October rebuild of the height and biomass models (dataset build
 without fiona/rasterio, PCA feature families, two-stream tensors with the per-plot band mask) is in `research/2026-10-09/`.
 
-**v3.2 (2026-10-09) - LiDAR noise rule, interior gap metrics, labelled per-plot LAS (validated on Muresk NUE 2025-09-30):**
+**v3.2 (2026-10-09) - LiDAR noise rule, interior gap metrics, labelled per-plot LAS:**
 the Traits tab gains a **Noise rule** selector (`gap` = points > 30 cm above the canopy, now the default; `none`;
 `legacy` upper-canopy SOR; `sor` k=10 at 3 or 5 sd) and a **Drop flagged noise points** box (default off: flagged
 points stay in the classified LAS as class 7 with the LAS *withheld* bit, so every reader can skip or recover them).
-Against 128 ruler heights the SOR variants removed sparse heads/awns and lowered the cth_p95 agreement (r 0.70 / LOOCV
-3.70 cm unfiltered, 0.68 / 3.79 cm at 5 sd, 0.66 / 3.88 cm at 3 sd), while the gap rule flagged one point in the trial.
+Against ruler heights the SOR variants removed sparse heads/awns and lowered the cth_p95 agreement (r 0.70 / LOOCV
+3.70 cm unfiltered, 0.68 / 3.79 cm at 5 sd, 0.66 / 3.88 cm at 3 sd), while the gap rule flagged a single point.
 LiDAR v3 features add the 20 cm-interior gap metrics `Pgap_interior`, `LAI_proxy_interior`, `cover_2cm_interior`,
 `ground_visible_2cm_interior` (+ `cover_2cm`, `ground_visible_2cm`, `ground_edge_frac`, `Pgap_interior_below_*`): refit
 polygons include alley soil along the long sides (68 % of ground returns within 20 cm of the edge; Pgap 8.3 % whole vs
@@ -23,11 +22,11 @@ Core API: `lidar_features.noise_mask`, `preprocess_plot(..., rule=, top_gap=)` r
 `lidar_features_all(..., noise_rule=, nsig=, drop_noise=)`, `extract_all_plots(..., noise_rule=, noise_nsig=, drop_noise=)`.
 Originals of the changed files are in `_backup_before_v3.2_2026-10-09/`.
 
-**v3.0.1 (2026-10-08) - QC fixes after the plot-level VNIR audit (ENVI, all plots of Muresk 2025 and AGT 2025):**
+**v3.0.1 (2026-10-08) - QC fixes after the plot-level VNIR audit (every plot checked against its orthomosaic in ENVI):**
 per-plot VNIR writer no longer zero-pads a plot whose window ends on the last row/column of the union read window
-(5 polygon pixels were lost in 2 of 1,785 AGT plots; every other plot was bit-exact); VNIR v3 features and the
+(5 polygon pixels were lost in 2 plots; every other plot was bit-exact); VNIR v3 features and the
 deep-model tensors read the cube in its own dtype instead of casting to uint16 (float32 cubes were truncated);
-VNIR v3 adds a flight-level reflectance check (`vnir_reflectance_ok`; a radiance/DN cube such as AGT 2025-11-13
+VNIR v3 adds a flight-level reflectance check (`vnir_reflectance_ok`; a radiance/DN cube
 now fails `vnir_qc_ok` instead of passing), censors red-based indices to NaN on red-clipped plots (`red_ok = 0`),
 and keeps the excluded O2-A bands out of the red-edge derivative; the Biomass ML tab now excludes `vnir_qc_ok = 0`
 plots from every family that uses VNIR features, not only from VNIR_core.

@@ -8,7 +8,7 @@ Pipeline per plot (bounding window of the polygon + a 0.25-1.0 m alley ring, nei
        legacy  : canopy_top._sor_upper - SOR on the top 10 % of points (k=8, 2 sd) + points > 25 cm above p99.5
        sor     : statistical outlier removal on all points (k neighbours, mean distance > mean + nsig sd) + the gap rule
                  (the v3.0 default with k=10, nsig=3)
-     Validation, Muresk NUE 2025-09-30 (128 plots, ruler heights): the gap rule flagged 1 point in the trial; every SOR
+     Validation against ruler heights (single-return cloud, 30,000 pts/m2): the gap rule flagged 1 point in the trial; every SOR
      variant removed sparse canopy tips (heads/awns, 0.3-1.5 % of points, half of them in the top 5 % of the canopy) and
      lowered the ruler agreement of cth_p95 (r 0.70 / LOOCV 3.70 cm unfiltered; 0.68 / 3.79 at 5 sd; 0.66 / 3.88 at 3 sd).
      Flagged points are KEPT and marked (class 7, withheld bit in written LAS) unless drop_noise=True; every metric
@@ -28,11 +28,11 @@ Pipeline per plot (bounding window of the polygon + a 0.25-1.0 m alley ring, nei
      v3.2: the same gap metrics on the 20 cm-trimmed INTERIOR (Pgap_interior, LAI_proxy_interior, cover_2cm_interior,
      ground_visible_2cm_interior) plus cover_2cm / ground_visible_2cm / ground_edge_frac on the whole polygon. Refit plot
      polygons include alley strips along the long sides, so whole-polygon Pgap is inflated by soil that is not inside the
-     canopy (Muresk 2025-09-30: 68 % of ground returns lie within 20 cm of the edge; Pgap 8.3 % whole vs 3.5 % interior;
+     canopy (on the validation flight 68 % of ground returns lay within 20 cm of the edge; Pgap 8.3 % whole vs 3.5 % interior;
      the interior / 2 cm versions correlate better with biomass). At 30,000 pts/m2 cover_5cm saturates at 1.0 in half of
      the plots; cover_2cm_interior and ground_visible_2cm_interior replace it in LIDAR_V3_CORE.
 
-Validated on Muresk NUE 2025 (ruler height): canopy-only percentiles + canopy-top metrics + normalised
+Validated against ruler heights on a wheat trial: canopy-only percentiles + canopy-top metrics + normalised
 intensity gave R2 0.50 / RMSE 3.6 cm with PLS or ridge (repeated 10-fold), and normalised canopy intensity
 was the strongest single biomass correlate at anthesis (r 0.47), as in Bates et al. (2026).
 
@@ -246,7 +246,7 @@ def lidar_features_all(x, y, z, intensity, return_number, number_of_returns, plo
                        noise_rule="gap", k=10, nsig=3.0, top_gap=0.30, drop_noise=False):
     """Run the v3 pipeline for every plot of a GeoDataFrame over the whole cloud arrays.
 
-    noise_rule / k / nsig / top_gap : see NOISE_RULES and noise_mask (default "gap", validated on Muresk 2025).
+    noise_rule / k / nsig / top_gap : see NOISE_RULES and noise_mask (default "gap").
     drop_noise           : False (default) keeps flagged points in the classified LAS (class 7 + withheld bit);
                            True removes them from the file. Features never use them.
     write_classified_dir : if given (and las_header/points from the LASManager), one LAS per plot is written with
