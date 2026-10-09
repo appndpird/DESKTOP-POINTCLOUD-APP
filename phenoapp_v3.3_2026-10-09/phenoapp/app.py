@@ -24,6 +24,7 @@ _PARENT = os.path.dirname(_HERE)
 if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
+from phenoapp import __version__
 from phenoapp.ui.project_tab        import ProjectTab
 from phenoapp.ui.generate_grid_tab  import GenerateGridTab
 from phenoapp.ui.edit_tab           import EditTab
@@ -43,8 +44,8 @@ from phenoapp.ui.about_tab          import AboutTab, _resource_path
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Plant Phenotyping from Point Clouds — v2 "
-                            "(QC + VNIR + fusion biomass)")
+        self.setWindowTitle(f"PhenoApp v{__version__} (2026-10-09) — Plant Phenotyping from Point Clouds "
+                            "(LiDAR v3.2 + VNIR v3.0.1 QC, biomass and height models)")
         self.resize(1500, 950)
 
         # Window icon — use the APPN logo if present

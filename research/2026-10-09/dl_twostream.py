@@ -15,7 +15,10 @@ Usage: python dl_twostream.py [--target biomass|height] [--epochs 100] [--varian
        (default 100 epochs per fold, OneCycle schedule; 10 folds x 3 variants)
 """
 import os, sys, json, time, math, argparse, numpy as np, pandas as pd, torch, torch.nn as nn, torch.nn.functional as F
-import spconv.pytorch as spconv
+try:
+    import spconv.pytorch as spconv
+except Exception:          # spconv missing: only the vnir_only variant can run (LiDAR variants are skipped with a log line)
+    spconv = None
 from sklearn.model_selection import StratifiedKFold
 ap = argparse.ArgumentParser(); ap.add_argument("--target", default="biomass"); ap.add_argument("--epochs", type=int, default=100)
 ap.add_argument("--variants", default="two_stream,lidar_only,vnir_only"); ap.add_argument("--folds", type=int, default=10); ap.add_argument("--maxpts", type=int, default=16000)
@@ -28,7 +31,7 @@ dev = torch.device(args.device if torch.cuda.is_available() else "cpu"); torch.m
 t0 = time.time(); LOGF = open(os.path.join(OUT, f"dl_{args.target}.log"), "a")
 def log(*a):
     s = f"[{time.time()-t0:5.0f}s] " + " ".join(str(x) for x in a); print(s, flush=True); LOGF.write(s + "\n"); LOGF.flush()
-log(f"device {dev}; torch {torch.__version__}; spconv {spconv.__version__ if hasattr(spconv, '__version__') else ''}")
+log(f"device {dev}; torch {torch.__version__}; spconv {'MISSING' if spconv is None else getattr(spconv, '__version__', 'ok')}; variants {args.variants}; epochs {args.epochs}")
 VOX = 0.02; GRID = (256, 96, 96)      # x (along plot, 5.1 m), y (across, 1.9 m), h (1.9 m) at 2 cm
 
 idx = pd.read_csv(os.path.join(DATA, "index.csv"))
@@ -116,7 +119,15 @@ y_all = idx[tcol].to_numpy(float); ylog = args.target == "biomass"
 yt = np.log(y_all) if ylog else y_all; ymu, ysd = yt.mean(), yt.std()
 skf = StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=0)
 rows, preds = [], []
+def _merge_csv(path, new):
+    """Keep the rows of variants from earlier runs (e.g. vnir_only run before spconv was available); replace the current ones."""
+    if os.path.exists(path):
+        old = pd.read_csv(path); new = pd.concat([old[~old.variant.isin(new.variant.unique())], new], ignore_index=True)
+    new.to_csv(path, index=False)
+
 for variant in args.variants.split(","):
+    if spconv is None and variant != "vnir_only":
+        log(f"skip {variant}: spconv is not installed in this environment"); continue
     pred = np.full(len(idx), np.nan)
     for fold, (tr, te) in enumerate(skf.split(idx, idx.dataset)):
         model = TwoStream(variant, len(DSETS)).to(dev)
@@ -142,9 +153,10 @@ for variant in args.variants.split(","):
         rows.append(dict(scheme=f"{args.folds}fold_pooled", target=tcol, variant=variant, dataset=d, n=int(sel.sum()), **m)); log(f"  {variant} {d}: R2 {m['R2']:.3f} RMSE {m['RMSE']:.1f} acc {m['accuracy']:.1f}%")
     m = metrics(pred, y_all); rows.append(dict(scheme=f"{args.folds}fold_pooled", target=tcol, variant=variant, dataset="ALL", n=len(idx), **m)); log(f"  {variant} ALL: R2 {m['R2']:.3f} RMSE {m['RMSE']:.1f}")
     preds.append(pd.DataFrame(dict(variant=variant, dataset=idx.dataset, Plot_ID=idx.Plot_ID, Plot=idx.Plot, Variety=idx.Variety, measured=y_all, predicted=pred)))
-    pd.DataFrame(rows).to_csv(os.path.join(RES, f"dl_{args.target}_comparison.csv"), index=False)
-    pd.concat(preds).to_csv(os.path.join(RES, f"dl_{args.target}_per_plot_predictions.csv"), index=False)
-json.dump(dict(target=tcol, epochs=args.epochs, folds=args.folds, maxpts=args.maxpts, variants=args.variants, device=str(dev), n=len(idx),
+    _merge_csv(os.path.join(RES, f"dl_{args.target}_comparison.csv"), pd.DataFrame(rows))
+    _merge_csv(os.path.join(RES, f"dl_{args.target}_per_plot_predictions.csv"), pd.concat(preds))
+json.dump(dict(target=tcol, epochs=args.epochs, folds=args.folds, maxpts=args.maxpts, variants_this_run=args.variants, device=str(dev), n=len(idx),
+               augmentation="train only: random 180-deg rotation, mirror across the row axis, 0-30 % point dropout, 1 cm xy jitter; pixel bootstrap + 0.9-1.1 brightness",
                band_policy="per-plot band_mask (vnir_band_usable) AND pixel > 0 AND not excluded; masked bands zero after SNV; availability mask appended to the embedding"),
           open(os.path.join(RES, f"dl_{args.target}_settings.json"), "w"), indent=1)
 log("DL DONE")
