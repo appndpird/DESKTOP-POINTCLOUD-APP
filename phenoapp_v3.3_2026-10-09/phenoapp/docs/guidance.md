@@ -596,6 +596,66 @@ JSON summary in <metrics>_dl_<target>_training). Expect the feature models to be
 several hundred labelled plots per crop are available: on the validation trial the network reached biomass R2 0.22
 against 0.35 for the fused ridge, and height 3.9 cm against 3.6 cm.
 
+### Using the pretrained deep models, step by step
+
+The bundled ensemble lives in `phenoapp/assets/dl_models/` (`two_stream_<target>_fold<k>.pt`, five fold models per
+target, biomass in kg/ha dry and height in cm). A prediction is the mean of the fold models; the spread between them is
+written next to it as an uncertainty.
+
+1. **Environment.** The network needs torch and spconv, which are not in PhenoApp's own environment. Create one once
+   (conda or venv; Python 3.11, torch 2.6 with CUDA 12.4, `spconv-cu124`) and tick nothing else. On an older GPU without
+   prebuilt spconv kernels (Pascal, e.g. TITAN Xp) spconv compiles them at first use and needs the CUDA 12.4 compiler
+   headers in the same environment (`cuda-nvcc`, `cuda-cudart-dev`, `cuda-cccl`, `cuda-nvrtc-dev`, `cuda-cuxxfilt` from
+   conda-forge; the first run then takes a few minutes longer). On the Deep Models tab press "Detect automatically" or
+   pick the interpreter; the status line reports torch, the GPU and whether spconv is present. Without spconv only the
+   VNIR-only variant can run.
+2. **Inputs.** The Project tab needs the flight LAS and an aligned plot grid; the VNIR Spectral tab needs the reflectance
+   cube of the same flight. The cube must be reflectance (the flight-level check is applied; a radiance or DN cube makes
+   every spectral value unusable and the plots are scored by the LiDAR stream alone). Give the dataset a name and the
+   growth stage (anthesis or maturity): the stage selects the trial/stage embedding the ensemble was trained with.
+   A ground-truth CSV (Plot_ID plus biomass_kg_ha and/or height_cm) is optional for prediction and required for training.
+3. **Prepare the plot tensors.** One file per plot is written to `dl_data/<name>/` next to the metrics CSV, with the
+   classified cloud (noise removed, height above the plot-local ground, normalised intensity, return number), the
+   cleaned VNIR pixels of the plot region, the per-plot usable-band mask (NaN rule) and the bookkeeping in `index.csv`.
+   The same tensors serve prediction and training; prepare them once per flight.
+4. **Predict.** Choose the target, keep variant `two_stream`, leave the weights folder at the bundled path (or point it at
+   a folder of fold models trained elsewhere) and press "Predict with pretrained ensemble". Output:
+   `<metrics>_dl_<target>_<variant>_pretrained_predictions.csv` with one row per plot: the prediction, the fold spread,
+   the measured value when given, and the metrics (R2, RMSE, rRMSE, MAE, bias, r, accuracy) printed in the log.
+5. **Read the result with the right expectation.** The ensemble was trained on wheat plots of two trials at anthesis and
+   maturity. On a new trial it transfers the structure-to-biomass relation but not the trial's own offset: compare the
+   predictions with a few measured plots and apply an offset, or treat the output as a ranking. Within a trial with its own
+   ground truth, the feature models of the Height Models and Biomass ML tabs were as good or better in every test so far.
+6. **Train or cross-validate on your own plots.** With a ground-truth CSV, "Train / cross-validate on this trial" runs
+   k-fold cross-validation (default 10 folds, 100 epochs per fold, training-time augmentation: random 180-degree
+   rotation, mirror across the row axis, 0-30 % point dropout, 1 cm jitter, pixel bootstrap and a 0.9-1.1 brightness
+   factor) and then fits a model on all plots. Outputs in `<metrics>_dl_<target>_training/`: fold weights, held-out
+   predictions per plot and a JSON summary. Several hundred labelled plots per crop are needed before the network beats
+   the feature models; with 100-250 plots use it as a check, not as the reporting model.
+7. **Band policy.** The bundled models and the tab use every band that is usable on a plot (the NaN rule) and tell the
+   network which bands were absent. For cross-trial work with flights that lost bands to clipping, train and predict on
+   a fixed common band list instead (the research script offers `--bands common`; the list of bands usable on every
+   flight is written by the dataset build as `vnir_common_bands.csv`).
+
+### Features used by each model
+
+| Tab / model | Inputs |
+|---|---|
+| Traits: canopy-top height | `cth_p95`: 95th percentile of the 5 cm cell maxima above the plot-local ground |
+| Height Models: linear calibration | `cth_p95` only (ruler = a + b x cth_p95) |
+| Height Models: 7-feature ridge / RF / XGBoost | `cth_p95`, `tip_thin` (cth_max - cth_p95), `cth_cover`, `cover_frac`, `roughness`, `vspread` (h_p99 - h_median), `pt_density` |
+| Height Models / Biomass ML: LiDAR v3 core (22) | canopy-only percentiles `H50`, `H95`, `H99`, `H999`, `H_topN_mean`, `H_mean`, `H_sd`, `H_crr`; canopy-top `cth_p95`, `cth_p99`, `tip_thin`; cover and gaps on the 20 cm interior `cover_2cm_interior`, `ground_visible_2cm_interior`, `Pgap_interior`, `LAI_proxy_interior`; `vox_volume_m3_per_m2`, `profile_area_m`, `canopy_pts_per_m2`, `roughness`, `rumple`; normalised intensity `I_canopy_mean`, `I_canopy_p90` |
+| Height Models / Biomass ML: VNIR v3 core (22) | vegetation-masked indices `NDRE740_veg`, `NDRE720_veg`, `REP_veg`, `LCI_veg`, `MTCI_veg`, `CIRE_veg`, `NDVI_nb_veg`, `OSAVI_veg`, `GNDVI_veg`, `kNDVI_veg`, `NIRv_veg`, `PRI_veg`, `WBI_veg`; `fcover_vnir`; reflectance `refl_N`, `refl_RE1`, `refl_R`; red-edge shape `red_edge_slope_max`, `red_edge_pos_deriv_nm`; spectral scores `spec_pc1..3` |
+| Biomass ML: LiDAR_core | the LiDAR biomass list (25): `H95`, `H99`, `H_mean`, `H50`, `H_sd`, `H_crr`, `cth_p95`, `cover_5cm`, `Pgap`, `LAI_proxy`, `vox_volume_m3_per_m2`, `PVI_m`, `profile_area_m`, `canopy_pts_per_m2`, `roughness`, `rumple`, `I_canopy_mean`, `I_canopy_p90`, `I_canopy_x_cover`, `Pgap_below_020cm`, `Pgap_below_040cm`, `Pgap_below_060cm`, `dens_1`, `dens_5`, `dens_9` |
+| Biomass ML: VNIR_core | VNIR v3 core + `WDRVI_veg`, `NDVI_nb`, `NDRE740`, `OSAVI`, `refl_RE2`, `refl_G`, `red_depth` |
+| Biomass ML: Fused_core | LiDAR_core + VNIR_core + 9 canopy-weighted indices (`NDRE740_veg_x_cover`, `OSAVI_veg_x_cover`, `GNDVI_veg_x_cover`, `NDVI_nb_veg_x_cover`, `NDRE740_veg_x_H95`, `OSAVI_veg_x_H95`, `REP_veg_x_H95`, `LCI_veg_x_H95`, `NDRE_x_PVI`) |
+| Biomass ML: Fused_all | every numeric v3 column of the metrics and VNIR tables |
+| All of the above | random-forest importance keeps the top 12 (Biomass ML) or top 10 (Height Models) features inside each training fold; families with fewer features use all |
+| PCA families (Biomass ML) and PCA sets (Height Models) | every finite LiDAR feature (about 70-85 columns) and / or every finite VNIR feature (about 130), each block standardised and reduced to the components holding 95 % of its variance inside the fold; the band variants use the mean vegetation spectrum (log10, SNV) over the bands usable on >= 95 % of the plots |
+| Deep Models: LiDAR stream | the raw classified plot cloud, up to 24,000 points, voxelised at 2 cm: height above ground, log normalised intensity, return number |
+| Deep Models: VNIR stream | 512 cleaned pixel spectra per plot, all 172 bands after log10 and SNV, with the usable-band mask as a second input; invalid bands are zero and flagged |
+| Deep Models: fusion | 128-d LiDAR embedding + 128-d spectral embedding + 8-d trial/stage embedding -> regression head |
+
 ## Tips for accurate results
 
 1. **Always tick the SMRF option** for the first run on a new LAS.

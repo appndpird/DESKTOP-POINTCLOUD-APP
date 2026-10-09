@@ -128,7 +128,7 @@ def metrics(p, y):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("mode", choices=["probe", "predict", "train"]); ap.add_argument("--data"); ap.add_argument("--weights"); ap.add_argument("--target", default="biomass")
-    ap.add_argument("--out"); ap.add_argument("--device", default="auto"); ap.add_argument("--variant", default="two_stream"); ap.add_argument("--epochs", type=int, default=60); ap.add_argument("--folds", type=int, default=10)
+    ap.add_argument("--out"); ap.add_argument("--device", default="auto"); ap.add_argument("--variant", default="two_stream"); ap.add_argument("--epochs", type=int, default=100); ap.add_argument("--folds", type=int, default=10)
     a = ap.parse_args()
     if a.mode == "probe":
         print(json.dumps(probe())); return

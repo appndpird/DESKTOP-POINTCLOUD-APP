@@ -82,7 +82,7 @@ class DeepTab(QWidget):
         v.addWidget(g2)
         g3 = QGroupBox("3. Run"); f3 = QFormLayout(g3)
         self.cb_target = QComboBox(); self.cb_target.addItems(["biomass", "height"]); self.cb_variant = QComboBox(); self.cb_variant.addItems(["two_stream", "lidar_only", "vnir_only"])
-        self.sp_epochs = QSpinBox(); self.sp_epochs.setRange(5, 500); self.sp_epochs.setValue(60); self.sp_folds = QSpinBox(); self.sp_folds.setRange(2, 20); self.sp_folds.setValue(10)
+        self.sp_epochs = QSpinBox(); self.sp_epochs.setRange(5, 500); self.sp_epochs.setValue(100); self.sp_folds = QSpinBox(); self.sp_folds.setRange(2, 20); self.sp_folds.setValue(10)
         row = QHBoxLayout(); row.addWidget(QLabel("target")); row.addWidget(self.cb_target); row.addWidget(QLabel("variant")); row.addWidget(self.cb_variant); row.addWidget(QLabel("epochs")); row.addWidget(self.sp_epochs); row.addWidget(QLabel("folds")); row.addWidget(self.sp_folds); row.addStretch(); f3.addRow("Options:", row)
         row = QHBoxLayout(); self.ed_weights = QLineEdit(pretrained_weights_dir()); b = QPushButton("Browse..."); b.clicked.connect(lambda: self._pick_dir(self.ed_weights)); row.addWidget(self.ed_weights); row.addWidget(b); f3.addRow("Weights folder:", row)
         row = QHBoxLayout(); self.btn_pred = QPushButton("Predict with pretrained ensemble"); self.btn_pred.clicked.connect(lambda: self._run("predict"))

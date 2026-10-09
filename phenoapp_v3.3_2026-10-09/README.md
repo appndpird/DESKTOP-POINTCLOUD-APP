@@ -8,6 +8,10 @@ and reduced to the principal components holding 95 % of the variance, with scale
 and saved in the model pipeline; no feature selection. The Height Models tab gains the matching sets (LiDAR PCA with ridge
 or Gaussian process; LiDAR + VNIR PCA per modality with ridge, Gaussian process or random forest; joint PCA with ridge).
 Results report the components kept per block. API: `fit_trait_models(..., vnir_cols=, spectra=)`, `apply_model(..., spectra=)`.
+The Guidance tab (`phenoapp/docs/guidance.md`) now has "Using the pretrained deep models, step by step" (environment,
+inputs, tensors, predict, interpretation, training, band policy) and "Features used by each model" (the exact input list
+of every Height Models model, Biomass ML family, PCA family and the two streams of the deep network). Deep Models default
+epochs are 100.
 
 **v3.3 (2026-10-09) - combined release:** the v3.2 LiDAR update (noise rule, interior gap metrics, labelled per-plot LAS)
 and the v3.0.1 VNIR QC update (exact per-plot cubes, NaN rule for unusable bands and indices, flight-level reflectance
