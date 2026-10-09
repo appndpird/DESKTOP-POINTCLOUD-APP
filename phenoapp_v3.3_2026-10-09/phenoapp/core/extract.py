@@ -192,7 +192,7 @@ def extract_all_plots(
                         json.dump(cal, f, indent=2)
             except Exception as e:
                 df.attrs["target_calibration_error"] = str(e)
-    # ---- LiDAR v3: outlier removal, ground/canopy classification, LiDAR360-style features ----
+    # ---- LiDAR v3: per-plot noise removal, ground/canopy classification, canopy-only features ----
     if lidar_v3 and len(df):
         from .lidar_features import lidar_features_all
         if progress_cb:

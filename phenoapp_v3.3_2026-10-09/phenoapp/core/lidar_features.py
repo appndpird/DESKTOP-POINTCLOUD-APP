@@ -1,5 +1,5 @@
 """
-LiDAR360-style per-plot preprocessing, point classification and feature extraction (PhenoApp v3; v3.2 update 2026-10-09).
+Per-plot preprocessing, point classification and canopy feature extraction (PhenoApp v3; v3.2 update 2026-10-09).
 
 Pipeline per plot (bounding window of the polygon + a 0.25-1.0 m alley ring, neighbours excluded):
   1. Noise rule (selectable, NOISE_RULES; default "gap")                                -> class 7 (noise)

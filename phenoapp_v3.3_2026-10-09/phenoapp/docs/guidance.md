@@ -488,9 +488,10 @@ point.
 
 ## PhenoApp v3 (2026-10-06): LiDAR preprocessing and classification, cleaned VNIR, fused ML
 
-**LiDAR v3 (Traits tab, ticked by default).** Each plot is processed the way LiDAR360 does it, but per plot and
-tied to the plot-local ground: statistical outlier removal (10 neighbours, 3 sd) plus isolated points more than
-30 cm above the canopy are flagged noise (class 7); a robust plane through the alley ring (25 cm cells, 5th
+**LiDAR v3 (Traits tab, ticked by default).** Each plot goes through the standard forestry sequence (noise removal,
+ground classification, height normalisation, canopy classification, canopy metrics), but per plot and tied to the
+plot-local ground: the noise rule (default: isolated points more than 30 cm above the canopy; statistical outlier
+variants selectable) flags noise (class 7); a robust plane through the alley ring (25 cm cells, 5th
 percentile) refined with in-plot points within 8 cm is the ground (class 2, |h| <= 8 cm); heights are normalised
 to it; points above 10 cm are canopy (class 5), 8-10 cm low vegetation (class 3). Tick "Write classified per-plot
 LAS" to get one classified LAS per plot in <project>/plots_las_classified. Features are computed on canopy points

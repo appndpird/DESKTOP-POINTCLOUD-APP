@@ -50,7 +50,7 @@ plot, one column per band, 1 = usable / 0 = the spectra cell is NaN, plus `n_usa
 `Biomass Dataset\build_plot_traits_indices.py` carry it as `<flight>_Bands_QC` and `<flight>_Bands_ValidFrac` sheets.
 
 **v3.0 (2026-10-06)** - LiDAR v3 preprocessing + point classification (noise / ground / low veg / canopy) with
-LiDAR360-style canopy-only features, cleaned VNIR v3 features (soil mask, veg-only indices, spectral shape, PCA),
+canopy-only features from the per-plot classification, cleaned VNIR v3 features (soil mask, veg-only indices, spectral shape, PCA),
 Height Models v3 sets (LiDAR core, LiDAR+VNIR; PLS / ridge / GPR / RF with nested selection, repeated 10-fold),
 new Biomass ML tab (fused features, 8 learners, nested CV, saved models), and (v3.1) a Deep Models tab running the
 two-stream network (sparse 3D CNN + spectral transformer) in an external torch environment with automatic

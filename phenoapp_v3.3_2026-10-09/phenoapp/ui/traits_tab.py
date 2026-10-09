@@ -378,7 +378,7 @@ class TraitsTab(QWidget):
         b_tg.clicked.connect(_pick_targets)
         cth_row.addWidget(self.cb_cth_ground, stretch=2); cth_row.addWidget(self.ed_targets, stretch=2); cth_row.addWidget(b_tg)
 
-        self.cb_lidar_v3 = QCheckBox("LiDAR v3: outlier removal, ground/canopy classification, LiDAR360-style canopy features")
+        self.cb_lidar_v3 = QCheckBox("LiDAR v3: per-plot noise removal, ground / canopy classification, canopy-only features")
         self.cb_lidar_v3.setChecked(True)
         self.cb_lidar_v3.setToolTip(
             "Per plot: noise rule (see 'Noise rule' below; flagged points = class 7), "

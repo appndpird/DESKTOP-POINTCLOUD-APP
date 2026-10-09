@@ -39,7 +39,7 @@ HEIGHT_MODELS = {
     "struct_ridge": ("Ridge on 7 canopy-structure features", STRUCT_FEATURES, "ridge"),
     "struct_rf":    ("Random forest on 7 canopy-structure features (transfers between dates)", STRUCT_FEATURES, "rf"),
     "struct_xgb":   ("XGBoost on 7 canopy-structure features, monotone in cth_p95", STRUCT_FEATURES, "xgb"),
-    # v3 (2026-10-06): canopy-only LiDAR360-style features, nested top-10 selection inside each fold
+    # v3 (2026-10-06): canopy-only features from the per-plot classification, nested top-10 selection inside each fold
     "lidar_v3_pls":   ("v3 LiDAR core (22 canopy features, v3.2 interior gap metrics) - PLS, nested selection", LIDAR_V3_CORE, "pls_sel"),
     "lidar_v3_ridge": ("v3 LiDAR core - Ridge, nested selection", LIDAR_V3_CORE, "ridge_sel"),
     "lidar_v3_gpr":   ("v3 LiDAR core - Gaussian process (best date-to-date transfer with a target offset)", LIDAR_V3_CORE, "gpr_sel"),
