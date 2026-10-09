@@ -168,6 +168,7 @@ for variant in args.variants.split(","):
 json.dump(dict(target=tcol, epochs=args.epochs, folds=args.folds, maxpts=args.maxpts, variants_this_run=args.variants, device=str(dev), n=len(idx),
                band_policy=args.bands, n_common_bands=(int(COMMON.sum()) if COMMON is not None else None),
                augmentation="train only: random 180-deg rotation, mirror across the row axis, 0-30 % point dropout, 1 cm xy jitter; pixel bootstrap + 0.9-1.1 brightness",
-               band_policy="per-plot band_mask (vnir_band_usable) AND pixel > 0 AND not excluded; masked bands zero after SNV; availability mask appended to the embedding"),
+               band_policy_note=("per_plot: band_mask (vnir_band_usable) AND pixel > 0 AND not excluded; common: fixed common_95 list AND pixel > 0; "
+                                 "masked bands zero after SNV; availability mask appended to the embedding")),
           open(os.path.join(RES, f"dl_{args.target}{TAG}_settings.json"), "w"), indent=1)
 log("DL DONE")

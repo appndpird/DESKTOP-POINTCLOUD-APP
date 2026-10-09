@@ -115,6 +115,15 @@ if os.path.exists(dlp):
     dl_rows = DLc[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
 dlh = os.path.join(DL, "results", "dl_height_comparison.csv")
 if os.path.exists(dlh): DLH = pd.read_csv(dlh)[["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
+# common-band run (--bands common): the same network with the fixed 111-band list for every plot
+DLCB = DLHCB = None
+dlcb = os.path.join(DL, "results", "dl_biomass_commonbands_comparison.csv")
+if os.path.exists(dlcb): DLCB = pd.read_csv(dlcb)[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
+dlhcb = os.path.join(DL, "results", "dl_height_commonbands_comparison.csv")
+if os.path.exists(dlhcb): DLHCB = pd.read_csv(dlhcb)[["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
+ncb = None
+cbp = os.path.join(M, "dataset", "vnir_common_bands.csv")
+if os.path.exists(cbp): ncb = int(pd.read_csv(cbp).common_95.sum())
 
 css = """<style>body{font-family:Segoe UI,Arial,sans-serif;max-width:1180px;margin:0 auto;padding:20px;color:#1b1b1b;line-height:1.45}h1{font-size:1.7rem}h2{margin-top:36px;border-bottom:2px solid #ddd;padding-bottom:4px}h3{margin-top:22px}
 table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-nums}th,td{padding:4px 8px;border-bottom:1px solid #e3e3e3;text-align:right}th:first-child,td:first-child,td:nth-child(2),th:nth-child(2){text-align:left}th{background:#f3f4f2;position:sticky;top:0}
@@ -162,6 +171,10 @@ html += ["<h2>5. Two-stream deep network (sparse 3D CNN on the classified plot c
          "Nothing is augmented at test time, and the feature-based models use no augmentation (their regularisation is the nested selection, PCA and the ridge / PLS penalties). The pooled R² is inflated by the between-dataset differences in mean biomass; the per-dataset rows are the comparable numbers.</p>",
          img("b_dl"), img("b_dl2"), table_html(dl_rows) if dl_rows is not None else "<p>not run (torch / spconv unavailable at build time)</p>",
          ("<h3>Same network for height (Muresk)</h3>" + table_html(DLH)) if DLH is not None else "",
+         (f"<h3>Common-band run: the same network with one fixed band list for every flight</h3><p>Band policy 'common': the {ncb} bands usable on at least 95 % of the ground-truth plots of every reflectance flight "
+          "(522-645, 691-754, 772-926, 965-1000 nm; dataset\\vnir_common_bands.csv) are the spectral input of every plot, so no flight is represented by a different band set and the network cannot use band availability as a trial fingerprint. "
+          "Blue and the red absorption well are dropped for all plots; clipped pixels are still ignored; the radiance flight stays LiDAR-only. Per-plot run above = most data per plot; common-band run = identical inputs across flights.</p>"
+          + table_html(DLCB) + (("<h4>Height, common bands</h4>" + table_html(DLHCB)) if DLHCB is not None else "")) if DLCB is not None else "",
          "<h2>6. Files</h2><p class='small'>Everything is under Biomass Experiment\\Biomass_Height_2026-10-09: dataset\\ (per trial / flight: ground_truth.csv, features_lidar.csv, features_vnir.csv, vnir_spectra.csv, vnir_band_usable.csv, features_all.csv, lidar_classified\\, vnir\\), "
          "height\\ and biomass\\ (results\\, models\\), two_stream\\ (dl_data\\, results\\, models\\), figures\\, scripts\\ (build_dataset.py, dl_prepare.py, height_models.py, biomass_models.py, pca_families.py, dl_twostream.py, report_builder.py, grid_pyshp.py, vnir_envi.py) and README.md.</p>"]
 page = "\n".join(html)
