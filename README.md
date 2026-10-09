@@ -2,7 +2,10 @@
 
 **Current version: PhenoApp v3.3.1 (2026-10-09)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
 v3.3.1 adds the PCA feature families (LiDAR, VNIR, fused per modality, joint, spectral-band) to the Biomass ML tab and the
-matching PCA sets to the Height Models tab. v3.3 combines the v3.2 LiDAR update (gap noise rule, 20 cm-interior gap metrics, labelled per-plot LAS with
+matching PCA sets to the Height Models tab. `USER_GUIDE.md` is the end-to-end recipe for training, testing and inference
+(feature extraction, Height Models and Biomass ML tabs, applying saved models to another flight, offsets, command line,
+metrics, checklist); the Guidance tab inside the app carries the same text plus the walkthrough for the pretrained deep
+models and the input list of every model. v3.3 combines the v3.2 LiDAR update (gap noise rule, 20 cm-interior gap metrics, labelled per-plot LAS with
 HeightAboveGround) and the v3.0.1 VNIR QC update (exact per-plot cubes, NaN rule for unusable bands and indices,
 flight-level reflectance check, red-clipping censoring, band QC tables), verified together on five UAV flights.
 `research/2026-10-09/` holds the scripts of the 9 October rebuild of the height and biomass models (dataset build,
