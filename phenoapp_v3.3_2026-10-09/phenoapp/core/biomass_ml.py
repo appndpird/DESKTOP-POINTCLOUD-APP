@@ -8,6 +8,10 @@ Feature families
                features, spectral PCA scores, vegetation fraction
   Fused_core : both + CHM-weighted indices (index x cover, index x H95, NDRE x PVI)
   Fused_all  : every available v3 column
+  PCA families (v3.3, pca_families.py): LiDAR_PCA, VNIR_PCA, Fused_PCA (one PCA per modality, late fusion),
+               Fused_PCA_joint (one PCA on both, early fusion), VNIR_bands_PCA and Fused_bands_PCA (PCA on the mean
+               vegetation spectrum over the bands usable on >= 95 % of the plots). StandardScaler -> PCA keeping 95 % of
+               the variance, fitted inside every training fold; no feature selection; NaN cells median-filled.
 Learners     : Ridge, PLS, SVR (RBF), GPR, RandomForest, ExtraTrees, XGBoost*, LightGBM*  (*if installed)
 Validation   : nested repeated k-fold (feature selection by random-forest importance inside each training fold),
                leave-one-out, or fit-only. Metrics: R2, RMSE, rRMSE, MAE, bias, r, accuracy (100 - MAPE).
@@ -27,6 +31,7 @@ import numpy as np
 
 from .lidar_features import LIDAR_V3_CORE
 from .vnir_features import VNIR_V3_CORE
+from .pca_families import PCA_FAMILIES, family_inputs, pca_preprocessor, make_pca_learner, pca_summary, spectra_matrix
 
 LIDAR_CORE_BIOMASS = ["H95", "H99", "H_mean", "H50", "H_sd", "H_crr", "cth_p95", "cover_5cm", "Pgap", "LAI_proxy", "vox_volume_m3_per_m2", "PVI_m",
                       "profile_area_m", "canopy_pts_per_m2", "roughness", "rumple", "I_canopy_mean", "I_canopy_p90", "I_canopy_x_cover",
@@ -35,7 +40,8 @@ VNIR_CORE_BIOMASS = VNIR_V3_CORE + ["WDRVI_veg", "NDVI_nb", "NDRE740", "OSAVI", 
 WEIGHTED = {"NDRE740_veg_x_cover": ("NDRE740_veg", "cover_5cm"), "OSAVI_veg_x_cover": ("OSAVI_veg", "cover_5cm"), "GNDVI_veg_x_cover": ("GNDVI_veg", "cover_5cm"),
             "NDVI_nb_veg_x_cover": ("NDVI_nb_veg", "cover_5cm"), "NDRE740_veg_x_H95": ("NDRE740_veg", "H95"), "OSAVI_veg_x_H95": ("OSAVI_veg", "H95"),
             "REP_veg_x_H95": ("REP_veg", "H95"), "LCI_veg_x_H95": ("LCI_veg", "H95"), "NDRE_x_PVI": ("NDRE740_veg", "PVI_m")}
-FAMILIES = ["LiDAR_core", "VNIR_core", "Fused_core", "Fused_all"]
+FAMILIES = ["LiDAR_core", "VNIR_core", "Fused_core", "Fused_all"] + PCA_FAMILIES
+VNIR_FAMILIES = {"VNIR_core", "Fused_core", "Fused_all", "LiDAR+VNIR_height", "VNIR_PCA", "Fused_PCA", "Fused_PCA_joint", "VNIR_bands_PCA", "Fused_bands_PCA"}
 LEARNERS = ["Ridge", "PLS", "SVR_rbf", "GPR", "RandomForest", "ExtraTrees", "XGBoost", "LightGBM"]
 _NON_FEATURES = {"Plot_ID", "Plot", "B/R", "Bank", "Row", "Range", "region_mode", "region_area_m2", "area_m2", "qc_ok", "vnir_qc_ok", "red_ok", "ground_source",
                  "n_raw", "n_noise_removed", "ground_cells", "ground_rms_cm", "I_ring_median_raw", "region_px", "frac_in_cube", "veg_ndvi_threshold", "cth_ok"}
@@ -53,9 +59,11 @@ def _available(cols, d):
     return [c for c in cols if c in d.columns and np.isfinite(d[c].astype(float)).mean() > 0.95 and d[c].astype(float).std() > 0]
 
 
-def feature_family(df, family, exclude=()):
+def feature_family(df, family, exclude=(), vnir_cols=None):
     d = add_weighted(df)
     d = d.drop(columns=[c for c in exclude if c in d.columns])
+    if family in PCA_FAMILIES:
+        return family_inputs(family, d, exclude, vnir_cols)[0]
     if family == "LiDAR_core":
         return _available(LIDAR_CORE_BIOMASS, d)
     if family == "VNIR_core":
@@ -128,14 +136,20 @@ def _select(Xtr, ytr, k):
     return list(np.argsort(rf.feature_importances_)[::-1][:k])
 
 
-def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_select=12, progress_cb=None, scale_y=None):
-    """Nested cross-validated fit of `target_col` (from gt, joined on Plot_ID) on the chosen families x learners."""
+def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_select=12, progress_cb=None, scale_y=None, vnir_cols=None, spectra=None):
+    """Nested cross-validated fit of `target_col` (from gt, joined on Plot_ID) on the chosen families x learners.
+    vnir_cols : columns of the VNIR features CSV (tells the PCA families which block a column belongs to)
+    spectra   : mean vegetation spectra table (Plot_ID + one column per wavelength) for the *_bands_PCA families"""
     import pandas as pd
     from sklearn.base import clone
     from sklearn.model_selection import RepeatedKFold, LeaveOneOut
     d = add_weighted(df).merge(gt[["Plot_ID", target_col]].dropna(), on="Plot_ID", how="inner")
     if "qc_ok" in d.columns:
         d = d[d.qc_ok == 1]
+    if spectra is not None and any(f.endswith("bands_PCA") for f in families):
+        sb = spectra_matrix(spectra)
+        if len(sb.columns):
+            d = d.merge(sb, left_on="Plot_ID", right_index=True, how="left")
     d = d.reset_index(drop=True); y = d[target_col].to_numpy(float)
     if len(y) < 10:
         raise ValueError(f"only {len(y)} plots with features and {target_col}")
@@ -144,8 +158,12 @@ def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_selec
     results, fitted = [], {}
     total = len(families) * len(learners); done = 0
     for fam in families:
-        feats = feature_family(d, fam, exclude=(target_col,))
-        uses_vnir = fam in ("VNIR_core", "Fused_core", "Fused_all", "LiDAR+VNIR_height")
+        is_pca = fam in PCA_FAMILIES
+        if is_pca:
+            feats, blocks = family_inputs(fam, add_weighted(d), exclude=(target_col,), vnir_cols=vnir_cols)
+        else:
+            feats, blocks = feature_family(d, fam, exclude=(target_col,)), None
+        uses_vnir = fam in VNIR_FAMILIES
         if uses_vnir and "vnir_qc_ok" in d.columns:
             # plots whose VNIR failed QC (outside the cube, no vegetation, or a non-reflectance cube) are excluded
             # from EVERY family that uses VNIR features, not only from the VNIR-only family
@@ -153,13 +171,13 @@ def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_selec
         else:
             dm = d
         ym = dm[target_col].to_numpy(float); X = dm[feats].astype(float).fillna(dm[feats].astype(float).median()).to_numpy()
-        k = n_select if len(feats) > n_select + 3 else None
+        k = None if is_pca else (n_select if len(feats) > n_select + 3 else None)      # PCA families: no selection, the PCA is the reduction
         splits = list(RepeatedKFold(n_splits=10, n_repeats=5, random_state=0).split(X)) if cv == "rkf10" else (list(LeaveOneOut().split(X)) if cv == "loo" else [])
         for ln in learners:
             done += 1
             if not learner_available(ln) or not feats:
-                results.append(dict(family=fam, learner=ln, status="skipped (package missing or no features)")); continue
-            model = make_learner(ln, min(len(feats), k or len(feats)), sy)
+                results.append(dict(family=fam, learner=ln, status="skipped (package missing or no features" + (" - needs a VNIR features CSV / spectra table" if is_pca else "") + ")")); continue
+            model = make_pca_learner(ln, pca_preprocessor(blocks), sy) if is_pca else make_learner(ln, min(len(feats), k or len(feats)), sy)
             full = clone(model).fit(X[:, _select(X, ym, k)] if k else X, ym)
             idx_full = _select(X, ym, k) if k else list(range(len(feats)))
             pf = clone(model).fit(X[:, idx_full], ym).predict(X[:, idx_full]).ravel()
@@ -173,6 +191,8 @@ def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_selec
                 pcv = ps / np.maximum(cnt, 1); res["cv"] = metrics(pcv, ym); res["selection_frequency"] = dict(zip(feats, (selc / len(splits)).round(2).tolist()))
                 pred.loc[pred.Plot_ID.isin(dm.Plot_ID), f"predcv_{fam}_{ln}"] = pcv
             fitted[(fam, ln)] = (clone(model).fit(X[:, idx_full], ym), [feats[i] for i in idx_full])
+            if is_pca:
+                res["pca"] = pca_summary(fitted[(fam, ln)][0]); res["blocks"] = {name: [feats[i] for i in idx] for name, idx in blocks}
             results.append(res)
             if progress_cb:
                 progress_cb(int(100 * done / total), f"{fam} / {ln}" + (f": cv RMSE {res['cv']['RMSE']:.3g}" if "cv" in res else ""))
@@ -180,13 +200,14 @@ def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_selec
 
 
 def results_table(results, unit=""):
-    lines = [f"{'family':12s} {'learner':12s} {'n':>4s} {'nfeat':>5s} {'cvR2':>6s} {'cvRMSE':>9s} {'rRMSE%':>7s} {'cvMAE':>9s} {'cv r':>5s} {'acc%':>6s} {'fitR2':>6s}"]
+    lines = [f"{'family':16s} {'learner':12s} {'n':>4s} {'nfeat':>5s} {'PCs':>4s} {'cvR2':>6s} {'cvRMSE':>9s} {'rRMSE%':>7s} {'cvMAE':>9s} {'cv r':>5s} {'acc%':>6s} {'fitR2':>6s}"]
     for r in results:
         if r.get("status") != "ok":
-            lines.append(f"{r['family']:12s} {r['learner']:12s} {r['status']}"); continue
+            lines.append(f"{r['family']:16s} {r['learner']:12s} {r['status']}"); continue
         c = r.get("cv"); f = r["fit"]
+        pcs = f"{sum(v['n_components'] for v in r['pca'].values()):4d}" if r.get("pca") else "   -"
         cvs = f"{c['R2']:6.3f} {c['RMSE']:9.3g} {c['rRMSE']:7.1f} {c['MAE']:9.3g} {c['r']:5.2f} {c['accuracy']:6.1f}" if c else " " * 49
-        lines.append(f"{r['family']:12s} {r['learner']:12s} {r['n']:4d} {len(r['features']):5d} {cvs} {f['R2']:6.3f}")
+        lines.append(f"{r['family']:16s} {r['learner']:12s} {r['n']:4d} {len(r['features']):5d} {pcs} {cvs} {f['R2']:6.3f}")
     return "\n".join(lines)
 
 
@@ -200,9 +221,12 @@ def load_model(path):
     return joblib.load(path)
 
 
-def apply_model(df, saved, offset=0.0):
+def apply_model(df, saved, offset=0.0, spectra=None):
+    """spectra: mean vegetation spectra table of the flight, needed by the *_bands_PCA models (columns sb_<nm>)."""
     import pandas as pd
     d = add_weighted(df); feats = saved["features"]
+    if spectra is not None and any(f.startswith("sb_") for f in feats):
+        d = d.merge(spectra_matrix(spectra), left_on="Plot_ID", right_index=True, how="left")
     missing = [f for f in feats if f not in d.columns]
     if missing:
         raise ValueError("metrics table lacks " + ", ".join(missing))

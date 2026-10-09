@@ -33,6 +33,7 @@ import numpy as np
 STRUCT_FEATURES = ["cth_p95", "tip_thin", "cth_cover", "cover_frac", "roughness", "vspread", "pt_density"]
 from .lidar_features import LIDAR_V3_CORE
 from .vnir_features import VNIR_V3_CORE
+from .pca_families import numeric_feature_columns, split_blocks, pca_preprocessor, make_pca_learner, pca_summary
 HEIGHT_MODELS = {
     "cal_linear":   ("Linear calibration on cth_p95 (reference; ruler = a + b x cth_p95)", ["cth_p95"], "linear"),
     "struct_ridge": ("Ridge on 7 canopy-structure features", STRUCT_FEATURES, "ridge"),
@@ -45,7 +46,28 @@ HEIGHT_MODELS = {
     "fused_v3_pls":   ("v3 LiDAR + VNIR (43 features) - PLS, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE, "pls_sel"),
     "fused_v3_ridge": ("v3 LiDAR + VNIR - Ridge, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE, "ridge_sel"),
     "fused_v3_rf":    ("v3 LiDAR + VNIR - Random forest, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE, "rf_sel"),
+    # v3.3 PCA sets: every available feature of the block(s), standardised and reduced to the principal components that
+    # hold 95 % of the variance, fitted inside each training fold (pca_families.py); no feature selection
+    "lidar_v3_pca_ridge":      ("v3 LiDAR PCA (all LiDAR features -> PCA 95 %) - Ridge", "PCA:lidar", "pca_ridge"),
+    "lidar_v3_pca_gpr":        ("v3 LiDAR PCA - Gaussian process", "PCA:lidar", "pca_gpr"),
+    "fused_v3_pca_ridge":      ("v3 LiDAR + VNIR PCA (one PCA per modality, late fusion) - Ridge", "PCA:fused", "pca_ridge"),
+    "fused_v3_pca_gpr":        ("v3 LiDAR + VNIR PCA (one PCA per modality) - Gaussian process", "PCA:fused", "pca_gpr"),
+    "fused_v3_pca_rf":         ("v3 LiDAR + VNIR PCA (one PCA per modality) - Random forest", "PCA:fused", "pca_rf"),
+    "fused_v3_pcajoint_ridge": ("v3 LiDAR + VNIR joint PCA (one PCA on both, early fusion) - Ridge", "PCA:joint", "pca_ridge"),
 }
+_PCA_LEARNER = {"pca_ridge": "Ridge", "pca_gpr": "GPR", "pca_rf": "RandomForest"}
+
+
+def _pca_feature_set(kind, m, vnir_df=None):
+    """Input columns and blocks of a PCA set on the merged metrics table: 'lidar' | 'fused' | 'joint'."""
+    allf = numeric_feature_columns(m, exclude=("height_cm", "height_measured_cm"))
+    vcols = [c for c in vnir_df.columns if c != "Plot_ID"] if vnir_df is not None else None
+    lidar, vnir, _ = split_blocks(m, allf, vcols)
+    blocks = {"lidar": [("lidar", lidar)], "fused": [("lidar", lidar), ("vnir", vnir)], "joint": [("joint", lidar + vnir)]}[kind]
+    if any(len(c) < 2 for _, c in blocks):
+        return [], None
+    cols = [c for _, cs in blocks for c in cs]; pos = {c: i for i, c in enumerate(cols)}
+    return cols, [(n, [pos[c] for c in cs]) for n, cs in blocks]
 _CM_COLS = ("cth_p95", "cth_max", "cth_p90", "cth_p99", "cth_mean", "cth_pt_p99", "h_p99", "h_median", "h_p95", "h_max", "h_mean")
 REQUIRED_RAW = ["cth_p95", "cth_max", "cth_cover", "cover_frac", "roughness", "h_p99", "h_median", "pt_density"]
 
@@ -179,16 +201,23 @@ def fit_height_models(df, gt, keys, cv: str = "loo", progress_cb=None, vnir_df=N
         label, feats, learner = HEIGHT_MODELS[k]
         if learner == "xgb" and not xgboost_available():
             results.append(dict(key=k, label=label, status="skipped - xgboost not installed")); continue
+        blocks = None
+        if isinstance(feats, str) and feats.startswith("PCA:"):
+            feats, blocks = _pca_feature_set(feats[4:], m, vnir_df)
+            if not feats:
+                results.append(dict(key=k, label=label, status="skipped - no usable features for this PCA set (fused sets need the VNIR v3 CSV)")); continue
         miss = [f for f in feats if f not in m.columns]
         if miss:
             results.append(dict(key=k, label=label, status="skipped - missing features: " + ", ".join(miss[:6]) + (" (tick 'LiDAR v3' on the Traits tab / run VNIR v3)" ))); continue
         X = m[feats].to_numpy(float)
         if not np.isfinite(X).all():
             X = np.where(np.isfinite(X), X, np.nanmedian(X, axis=0))
-        model = _make(learner, feats)
+        model = make_pca_learner(_PCA_LEARNER[learner], pca_preprocessor(blocks)) if blocks is not None else _make(learner, feats)
         fit_model = clone(model).fit(X, y)
         pfit = np.asarray(fit_model.predict(X)).ravel()
         res = dict(key=k, label=label, n=int(len(y)), features=feats, status="ok", fit=_metrics(pfit, y))
+        if blocks is not None:
+            res["pca"] = pca_summary(fit_model); res["blocks"] = {name: [feats[i] for i in idx] for name, idx in blocks}
         pred_df[f"pred_{k}"] = pfit
         if splitter is not None:
             ps = np.zeros(len(y)); cnt = np.zeros(len(y))

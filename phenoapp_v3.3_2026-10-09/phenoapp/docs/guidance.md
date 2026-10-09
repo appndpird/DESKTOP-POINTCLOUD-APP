@@ -525,6 +525,20 @@ Fused_all; learners Ridge, PLS, SVR, GPR, RandomForest, ExtraTrees, XGBoost, Lig
 writes held-out and full-fit predictions, a results JSON, one joblib per model and a top-feature ranking; a saved
 model can be applied to another flight with an offset.
 
+**PCA families (v3.3.1), Biomass ML and Height Models.** The core families keep a few features chosen by random-forest
+importance inside each fold. The PCA families take the opposite route: every available feature of a block is
+standardised and reduced to the principal components that hold 95 % of its variance, and the components are the inputs
+of the learner. The scaler and the PCA are part of the model pipeline, so they are fitted inside every training fold and
+travel with the saved model. `LiDAR_PCA` and `VNIR_PCA` use one block each; `Fused_PCA` fits one PCA per modality and
+concatenates the components (late fusion); `Fused_PCA_joint` fits one PCA on both modalities together (early fusion);
+`VNIR_bands_PCA` and `Fused_bands_PCA` work on the mean vegetation spectrum itself (log10 reflectance, SNV per plot,
+only the bands usable on at least 95 % of the plots and outside the excluded ranges; the spectra CSV written by the VNIR
+Spectral tab is picked up next to the VNIR v3 CSV). Results show the components kept per block. Typical numbers: about
+80 LiDAR features reduce to 12 components and 130 VNIR features to 9; the fused PCA families were the best biomass
+and height models in the 9 October rebuild, a little above the selected-feature families, and they are less sensitive
+to which single feature happens to be chosen in a fold. The Height Models tab offers the same sets (LiDAR PCA, LiDAR +
+VNIR PCA per modality, joint PCA) with ridge, Gaussian process and random forest learners.
+
 **Validation choice.** The literature (review of 2020-2026 studies) uses k-fold or single random splits and rarely
 tests independent sites; k-fold pooled across dates is optimistic. In this tool: repeated 10-fold with nested
 feature selection is the default (stable, honest within a trial); LOOCV gives nearly the same numbers for n ~ 100

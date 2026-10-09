@@ -23,29 +23,43 @@ from phenoapp.core.biomass_ml import (FAMILIES, LEARNERS, fit_trait_models, resu
 
 
 def _load_inputs(metrics_csv, vnir_csv):
+    """Merged metrics + VNIR table and the list of VNIR feature columns (tells the PCA families which block a column belongs to)."""
     import pandas as pd
-    df = pd.read_csv(metrics_csv)
+    df = pd.read_csv(metrics_csv); vnir_cols = []
     if vnir_csv and os.path.exists(vnir_csv):
         v = pd.read_csv(vnir_csv); v = v[[c for c in v.columns if c == "Plot_ID" or c not in df.columns]]
-        df = df.merge(v, on="Plot_ID", how="left")
-    return df
+        df = df.merge(v, on="Plot_ID", how="left"); vnir_cols = [c for c in v.columns if c != "Plot_ID"]
+    return df, vnir_cols
+
+
+def _spectra_path(vnir_csv, explicit=""):
+    """The mean-spectra table written next to the VNIR v3 CSV (<base>_vnir_v3_spectra.csv), or an explicit path."""
+    if explicit and os.path.exists(explicit):
+        return explicit
+    if vnir_csv and vnir_csv.endswith("_vnir_v3.csv"):
+        cand = vnir_csv.replace("_vnir_v3.csv", "_vnir_v3_spectra.csv")
+        if os.path.exists(cand):
+            return cand
+    return ""
 
 
 class _Worker(QThread):
     progress = pyqtSignal(int, str); done_ok = pyqtSignal(str); error = pyqtSignal(str)
 
-    def __init__(self, metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select):
-        super().__init__(); self._a = (metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select)
+    def __init__(self, metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select, spectra_csv=""):
+        super().__init__(); self._a = (metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select, spectra_csv)
 
     def run(self):
         try:
             import pandas as pd
-            metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select = self._a
-            df = _load_inputs(metrics_csv, vnir_csv); gt = pd.read_csv(gt_csv)
+            metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select, spectra_csv = self._a
+            df, vnir_cols = _load_inputs(metrics_csv, vnir_csv); gt = pd.read_csv(gt_csv)
             if target not in gt.columns:
                 raise RuntimeError(f"ground-truth CSV has no column '{target}' (columns: {', '.join(gt.columns)})")
+            sp_path = _spectra_path(vnir_csv, spectra_csv); spectra = pd.read_csv(sp_path) if sp_path else None
             results, pred, fitted = fit_trait_models(df, gt, target, families, learners, cv=cv, n_select=n_select,
-                                                     progress_cb=lambda p, m: self.progress.emit(min(98, p), m))
+                                                     progress_cb=lambda p, m: self.progress.emit(min(98, p), m),
+                                                     vnir_cols=vnir_cols, spectra=spectra)
             base = os.path.splitext(metrics_csv)[0] + f"_{target}"
             pred.to_csv(base + "_ml_predictions.csv", index=False)
             saved = {}
@@ -68,6 +82,15 @@ class _Worker(QThread):
             txt = results_table(results) + toptxt
             if best:
                 txt += f"\n\nBest by held-out RMSE: {best['family']} / {best['learner']}: R2 {best['cv']['R2']:.3f}, RMSE {best['cv']['RMSE']:.3g}, accuracy {best['cv']['accuracy']:.1f}%\nFeatures: {', '.join(best['features'])}"
+                if best.get("pca"):
+                    txt += "\nPCA: " + "; ".join(f"{k} block {len(best['blocks'][k])} inputs -> {v['n_components']} components ({100 * v['explained_variance']:.0f} % of the variance)" for k, v in best["pca"].items())
+            pca_rows = [r for r in results if r.get("status") == "ok" and r.get("pca")]
+            if pca_rows:
+                txt += "\n\nPCA families (components kept per block, fitted on all plots; inside the folds the PCA is refitted on the training plots):\n" + \
+                       "\n".join(f"  {r['family']:16s} " + ", ".join(f"{k}: {len(r['blocks'][k])} -> {v['n_components']} ({100 * v['explained_variance']:.0f} %)" for k, v in r["pca"].items())
+                                 for r in {r["family"]: r for r in pca_rows}.values())
+            if sp_path:
+                txt += f"\nSpectra table used for the band PCA families: {sp_path}"
             txt += f"\n\nPredictions -> {base}_ml_predictions.csv\nResults -> {base}_ml_results.json\nModels -> {len(saved)} joblib files"
             self.progress.emit(100, "done"); self.done_ok.emit(txt)
         except Exception as e:
@@ -87,12 +110,26 @@ class BiomassMLTab(QWidget):
         self.ed_metrics = QLineEdit(); self.ed_vnir = QLineEdit(); self.ed_gt = QLineEdit(); self.ed_target = QLineEdit("biomass_kg_ha")
         for lab, ed, filt in (("Metrics CSV (LiDAR v3):", self.ed_metrics, "CSV (*.csv)"), ("VNIR v3 features CSV:", self.ed_vnir, "CSV (*.csv)"), ("Ground-truth CSV:", self.ed_gt, "CSV (*.csv)")):
             row = QHBoxLayout(); b = QPushButton("Browse..."); b.clicked.connect(lambda _, e=ed, ft=filt: self._pick(e, ft)); row.addWidget(ed); row.addWidget(b); f.addRow(lab, row)
+        self.ed_spectra = QLineEdit(); self.ed_spectra.setPlaceholderText("optional: <metrics>_vnir_v3_spectra.csv (found automatically next to the VNIR CSV); needed by the *_bands_PCA families")
+        row = QHBoxLayout(); b = QPushButton("Browse..."); b.clicked.connect(lambda: self._pick(self.ed_spectra, "CSV (*.csv)")); row.addWidget(self.ed_spectra); row.addWidget(b); f.addRow("Spectra CSV (band PCA):", row)
         f.addRow("Target column:", self.ed_target)
         v.addWidget(g)
         g2 = QGroupBox("Feature families, learners, validation"); f2 = QFormLayout(g2)
-        fr = QHBoxLayout(); self.cb_fam = {}
+        _TIPS = {"LiDAR_core": "Canopy-only LiDAR features (percentiles, cover, gap fraction, volume, intensity); random-forest top-k selection inside each fold.",
+                 "VNIR_core": "Vegetation-masked spectral indices, reflectance bands, red-edge shape, spectral PCA scores; selection inside each fold.",
+                 "Fused_core": "LiDAR core + VNIR core + CHM-weighted indices (index x cover, index x H95, NDRE x PVI); selection inside each fold.",
+                 "Fused_all": "Every available v3 column; selection inside each fold.",
+                 "LiDAR_PCA": "PCA family: every finite LiDAR feature standardised and reduced to the components holding 95 % of the variance (fitted inside each fold); no selection.",
+                 "VNIR_PCA": "PCA family: every finite VNIR index feature -> PCA (95 % variance) inside each fold.",
+                 "Fused_PCA": "PCA family, late fusion: one PCA per modality, the LiDAR and VNIR components are concatenated for the learner.",
+                 "Fused_PCA_joint": "PCA family, early fusion: one PCA on the concatenated LiDAR + VNIR features.",
+                 "VNIR_bands_PCA": "PCA on the mean vegetation spectrum (log10 reflectance, SNV per plot) over the bands usable on >= 95 % of the plots and outside the excluded ranges; needs the spectra CSV.",
+                 "Fused_bands_PCA": "LiDAR PCA + spectral-band PCA (late fusion); needs the spectra CSV."}
+        fr = QVBoxLayout(); r1 = QHBoxLayout(); r2 = QHBoxLayout(); self.cb_fam = {}
         for fam in FAMILIES:
-            cb = QCheckBox(fam); cb.setChecked(fam in ("LiDAR_core", "Fused_core")); self.cb_fam[fam] = cb; fr.addWidget(cb)
+            cb = QCheckBox(fam); cb.setChecked(fam in ("LiDAR_core", "Fused_core", "LiDAR_PCA", "Fused_PCA")); cb.setToolTip(_TIPS.get(fam, "")); self.cb_fam[fam] = cb
+            (r2 if fam.endswith("PCA") or fam.endswith("PCA_joint") else r1).addWidget(cb)
+        r1.addStretch(); r2.addStretch(); fr.addLayout(r1); fr.addLayout(r2)
         f2.addRow("Families:", fr)
         lr = QHBoxLayout(); self.cb_lrn = {}
         for ln in LEARNERS:
@@ -119,6 +156,9 @@ class BiomassMLTab(QWidget):
         if not self.ed_vnir.text().strip() and s.out_csv:
             cand = os.path.splitext(s.out_csv)[0] + "_vnir_v3.csv"
             if os.path.exists(cand): self.ed_vnir.setText(cand)
+        if not self.ed_spectra.text().strip():
+            sp = _spectra_path(self.ed_vnir.text().strip())
+            if sp: self.ed_spectra.setText(sp)
 
     def _pick(self, ed, filt):
         p, _ = QFileDialog.getOpenFileName(self, "Pick file", "", filt)
@@ -132,7 +172,7 @@ class BiomassMLTab(QWidget):
         if not fams or not lrn: QMessageBox.warning(self, "Nothing selected", "Tick at least one family and one learner."); return
         cv = ("rkf10", "loo", "none")[self.cb_cv.currentIndex()]
         self.btn.setEnabled(False); self.progress.setValue(0)
-        self._w = _Worker(m, self.ed_vnir.text().strip(), g, self.ed_target.text().strip() or "biomass_kg_ha", fams, lrn, cv, self.sp_sel.value())
+        self._w = _Worker(m, self.ed_vnir.text().strip(), g, self.ed_target.text().strip() or "biomass_kg_ha", fams, lrn, cv, self.sp_sel.value(), self.ed_spectra.text().strip())
         self._w.progress.connect(lambda p, s: (self.progress.setValue(p), self.progress.setFormat(f"{p}% - {s}")))
         self._w.done_ok.connect(lambda t: (self.btn.setEnabled(True), self.out.setPlainText(t)))
         self._w.error.connect(lambda e: (self.btn.setEnabled(True), self.out.append("\nERROR: " + e), QMessageBox.critical(self, "Failed", e.split("\n")[0])))

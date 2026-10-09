@@ -117,8 +117,11 @@ class HeightTab(QWidget):
         g2 = QGroupBox("Models and validation"); f2 = QFormLayout(g2)
         self.cbs = {}
         for k, (label, feats, learner) in HEIGHT_MODELS.items():
-            cb = QCheckBox(label); cb.setChecked(k in ("cal_linear", "struct_ridge", "struct_rf", "lidar_v3_pls", "fused_v3_pls"))
-            cb.setToolTip("features: " + ", ".join(feats))
+            cb = QCheckBox(label); cb.setChecked(k in ("cal_linear", "struct_ridge", "struct_rf", "lidar_v3_pls", "fused_v3_pls", "lidar_v3_pca_ridge", "fused_v3_pca_ridge"))
+            cb.setToolTip("features: " + (", ".join(feats) if not isinstance(feats, str) else
+                          {"PCA:lidar": "every available LiDAR feature -> PCA (95 % of the variance), fitted inside each training fold",
+                           "PCA:fused": "one PCA per modality (all LiDAR features, all VNIR v3 features), components concatenated (late fusion)",
+                           "PCA:joint": "one PCA on all LiDAR + VNIR v3 features together (early fusion)"}.get(feats, feats)))
             if learner == "xgb" and not xgboost_available():
                 cb.setChecked(False); cb.setEnabled(False); cb.setText(label + "  (xgboost not installed)")
             self.cbs[k] = cb; f2.addRow("", cb)

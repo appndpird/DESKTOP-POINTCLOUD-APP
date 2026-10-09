@@ -1,5 +1,14 @@
 # Plant Phenotyping from Point Clouds
 
+**v3.3.1 (2026-10-09) - PCA feature families** (`phenoapp/core/pca_families.py`): the Biomass ML tab gains `LiDAR_PCA`,
+`VNIR_PCA`, `Fused_PCA` (one PCA per modality, late fusion), `Fused_PCA_joint` (one PCA on both, early fusion),
+`VNIR_bands_PCA` and `Fused_bands_PCA` (PCA on the mean vegetation spectrum over the bands usable on >= 95 % of the plots,
+log10 + SNV per plot; the spectra CSV is found next to the VNIR v3 CSV). Every available feature of a block is standardised
+and reduced to the principal components holding 95 % of the variance, with scaler and PCA fitted inside each training fold
+and saved in the model pipeline; no feature selection. The Height Models tab gains the matching sets (LiDAR PCA with ridge
+or Gaussian process; LiDAR + VNIR PCA per modality with ridge, Gaussian process or random forest; joint PCA with ridge).
+Results report the components kept per block. API: `fit_trait_models(..., vnir_cols=, spectra=)`, `apply_model(..., spectra=)`.
+
 **v3.3 (2026-10-09) - combined release:** the v3.2 LiDAR update (noise rule, interior gap metrics, labelled per-plot LAS)
 and the v3.0.1 VNIR QC update (exact per-plot cubes, NaN rule for unusable bands and indices, flight-level reflectance
 check, red-clipping censoring, band QC tables) in one tree, verified on five UAV flights: every per-plot VNIR cube pixel-exact against its orthomosaic, LiDAR features
