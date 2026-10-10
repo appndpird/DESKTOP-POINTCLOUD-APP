@@ -641,8 +641,15 @@ on its own.
    k-fold cross-validation (default 10 folds, 100 epochs per fold, training-time augmentation: random 180-degree
    rotation, mirror across the row axis, 0-30 % point dropout, 1 cm jitter, pixel bootstrap and a 0.9-1.1 brightness
    factor) and then fits a model on all plots. Outputs in `<metrics>_dl_<target>_training/`: fold weights, held-out
-   predictions per plot and a JSON summary. Several hundred labelled plots per crop are needed before the network beats
-   the feature models; with 100-250 plots use it as a check, not as the reporting model.
+   predictions per plot, the band list used and a JSON summary. **Fine-tuning (warm start, ticked by default):** the
+   training starts from the bundled ensemble instead of random weights: the two encoders and the head of the matching
+   fold model are loaded, the trial/stage embedding is created afresh for your dataset(s), and the peak learning rate
+   is lowered from 1e-3 to 3e-4 so the pretrained features are adjusted rather than overwritten. This is the right choice
+   when the new trial has fewer than a few hundred labelled plots, because the network then only has to learn the new
+   trial's offset and scale on top of canopy features it already knows. Untick the box to train from scratch (several
+   hundred plots per crop), or use `--freeze-encoders` on the command line to train only the head and the embedding on a
+   very small dataset. Fine-tuned models are saved like any other and are applied with the same weights folder. Within a
+   trial, expect the feature models to stay as good or better until the labelled set is large.
 7. **Band policy.** The bundled models use the fixed common band list (111 bands, `common_bands.csv` next to the
    weights), which is also the default when you train from the tab, so every flight is represented by the same bands
    and the network cannot read band availability as a fingerprint of the trial. The alternative, `per_plot`, uses every

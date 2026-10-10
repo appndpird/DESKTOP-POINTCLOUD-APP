@@ -167,12 +167,16 @@ def prepare_plot_tensors(mgr, cube, plots, out_dir, dataset_name, stage, gt=None
     return idx
 
 
-def run_two_stream(python_exe, mode, data_dir, out, target="biomass", device="auto", variant="two_stream", weights=None, epochs=100, folds=10, log_cb=None):
+def run_two_stream(python_exe, mode, data_dir, out, target="biomass", device="auto", variant="two_stream", weights=None, epochs=100, folds=10, log_cb=None,
+                   init=None, bands="common"):
+    """init: folder of fold models to warm-start from (fine-tuning; e.g. pretrained_weights_dir()); bands: 'common' | 'per_plot' for training."""
     cmd = [python_exe, "-u", script_path(), mode, "--data", data_dir, "--target", target, "--device", device, "--variant", variant, "--out", out]
     if mode == "predict":
         cmd += ["--weights", weights or pretrained_weights_dir()]
     else:
-        cmd += ["--epochs", str(epochs), "--folds", str(folds)]
+        cmd += ["--epochs", str(epochs), "--folds", str(folds), "--bands", bands]
+        if init:
+            cmd += ["--init", init]
     env = dict(os.environ); env["PYTHONIOENCODING"] = "utf-8"
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env, bufsize=1)
     for line in p.stdout:

@@ -154,6 +154,10 @@ def main():
                     help="training only: 'common' = the fixed band list of common_bands.csv (next to this script's bundled weights, or --bands-csv), identical for every plot; "
                          "'per_plot' = every band usable on the plot with the availability mask. Prediction follows the ensemble: common when its folder holds common_bands.csv.")
     ap.add_argument("--bands-csv", default=None, help="CSV with wavelength_nm and common_95 columns (default: the bundled assets/dl_models/common_bands.csv)")
+    ap.add_argument("--init", default=None, help="training only: warm start (fine-tune) from a folder of fold models (<variant>_<target>_fold<k>.pt, e.g. the bundled ensemble) or one .pt file; "
+                                                 "encoders and head are loaded, the trial/stage embedding is re-initialised when the dataset count differs")
+    ap.add_argument("--init-lr", type=float, default=3e-4, help="peak learning rate when warm-starting (default 3e-4; 1e-3 from scratch)")
+    ap.add_argument("--freeze-encoders", action="store_true", help="with --init: train only the head and the embedding (very small datasets)")
     a = ap.parse_args()
     if a.mode == "probe":
         print(json.dumps(probe())); return
@@ -216,9 +220,26 @@ def main():
         else:
             import shutil; shutil.copy2(cbp, os.path.join(a.out, "common_bands.csv"))       # travels with the trained models
     print(f"[two_stream] band policy: {'common - ' + str(int(common.sum())) + ' fixed bands' if common is not None else 'per plot'}", flush=True)
-    def train_one(rows, epochs):
-        model = build(a.variant, max(len(ds_id), 1), dev); opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-3)
-        steps = epochs * math.ceil(len(rows) / 16); sched = torch.optim.lr_scheduler.OneCycleLR(opt, 1e-3, total_steps=steps)
+    def init_weights(model, fold):
+        """warm start: load the matching fold model (or fold 0) of --init; keep every tensor whose shape fits."""
+        p = a.init
+        if os.path.isdir(p):
+            cands = [f"{a.variant}_{a.target}_fold{fold}.pt", f"{a.variant}_{a.target}_fold0.pt"]
+            p = next((os.path.join(a.init, c) for c in cands if os.path.exists(os.path.join(a.init, c))), None)
+        if p is None or not os.path.exists(p): raise SystemExit(f"--init: no weights for {a.variant}/{a.target} in {a.init}")
+        sd = {k: (v.float() if v.is_floating_point() else v) for k, v in torch.load(p, map_location="cpu").items()}
+        own = model.state_dict(); sd = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape}
+        model.load_state_dict(sd, strict=False)
+        if a.freeze_encoders:
+            for n, prm in model.named_parameters(): prm.requires_grad = n.startswith(("head.", "ds_emb."))
+        return p, len(sd)
+    if a.init:
+        print(f"[two_stream] warm start from {a.init} (lr {a.init_lr}{', encoders frozen' if a.freeze_encoders else ''})", flush=True)
+    def train_one(rows, epochs, fold=0):
+        model = build(a.variant, max(len(ds_id), 1), dev); lr = 1e-3
+        if a.init: init_weights(model, fold); lr = a.init_lr
+        opt = torch.optim.AdamW([q for q in model.parameters() if q.requires_grad], lr=lr, weight_decay=1e-3)
+        steps = epochs * math.ceil(len(rows) / 16); sched = torch.optim.lr_scheduler.OneCycleLR(opt, lr, total_steps=steps)
         for ep in range(epochs):
             model.train()
             for C, F, S, D, Y, I in batches(rows, a.data, ds_id, True, rng, excl, device=dev, tcol=tcol, common=common):
@@ -227,7 +248,7 @@ def main():
         return model
     pred = np.full(len(idx), np.nan); folds = min(a.folds, len(idx))
     for fold, (tr, te) in enumerate(KFold(folds, shuffle=True, random_state=0).split(idx)):
-        t = time.time(); model = train_one(idx.iloc[tr], a.epochs); model.eval()
+        t = time.time(); model = train_one(idx.iloc[tr], a.epochs, fold); model.eval()
         with torch.no_grad():
             for C, F, S, D, Y, I in batches(idx.iloc[te], a.data, ds_id, False, rng, excl, device=dev, common=common):
                 p = model(C, F, S, D, len(I)).cpu().numpy() * ysd + ymu; pred[I] = np.exp(p) if ylog else p

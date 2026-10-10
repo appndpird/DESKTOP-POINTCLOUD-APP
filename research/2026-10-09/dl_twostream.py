@@ -23,8 +23,12 @@ from sklearn.model_selection import StratifiedKFold
 ap = argparse.ArgumentParser(); ap.add_argument("--target", default="biomass"); ap.add_argument("--epochs", type=int, default=100)
 ap.add_argument("--variants", default="two_stream,lidar_only,vnir_only"); ap.add_argument("--folds", type=int, default=10); ap.add_argument("--maxpts", type=int, default=16000)
 ap.add_argument("--device", default="cuda:0")
-ap.add_argument("--bands", default="per_plot", choices=["per_plot", "common"],
+ap.add_argument("--bands", default="common", choices=["per_plot", "common"],
                 help="per_plot: every band usable on the plot (NaN rule) with the availability mask; common: the fixed band list usable on >= 95 %% of the plots of every reflectance flight (dataset/vnir_common_bands.csv, column common_95), identical for all flights")
+ap.add_argument("--init", default=None, help="warm start (fine-tuning): folder of fold models (dl_<target>[_commonbands]_<variant>_fold<k>.pt or <variant>_<target>_fold<k>.pt) or one .pt file; "
+                                             "encoders and head are loaded, the trial/stage embedding is re-initialised when the number of datasets differs")
+ap.add_argument("--init-lr", type=float, default=3e-4, help="peak learning rate when warm-starting (default 3e-4; 1e-3 from scratch)")
+ap.add_argument("--freeze-encoders", action="store_true", help="with --init: train only the head and the embedding (for very small new datasets)")
 args = ap.parse_args()
 TAG = "" if args.bands == "per_plot" else "_commonbands"      # output files of the common-band run sit next to the per-plot ones
 B = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment"
@@ -140,8 +144,20 @@ for variant in args.variants.split(","):
         log(f"skip {variant}: spconv is not installed in this environment"); continue
     pred = np.full(len(idx), np.nan)
     for fold, (tr, te) in enumerate(skf.split(idx, idx.dataset)):
-        model = TwoStream(variant, len(DSETS)).to(dev)
-        opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-3); sched = torch.optim.lr_scheduler.OneCycleLR(opt, 1e-3, total_steps=args.epochs * math.ceil(len(tr) / 16))
+        model = TwoStream(variant, len(DSETS)).to(dev); lr = 1e-3
+        if args.init:
+            lr = args.init_lr; p = args.init
+            if os.path.isdir(p):
+                cands = [f"dl_{args.target}{TAG}_{variant}_fold{fold}.pt", f"{variant}_{args.target}_fold{fold}.pt", f"dl_{args.target}{TAG}_{variant}_fold0.pt", f"{variant}_{args.target}_fold0.pt"]
+                p = next((os.path.join(args.init, c) for c in cands if os.path.exists(os.path.join(args.init, c))), None)
+            if p is None or not os.path.exists(p): raise SystemExit(f"--init: no weights for {variant}/{args.target} in {args.init}")
+            sd = {k: (v.float() if v.is_floating_point() else v) for k, v in torch.load(p, map_location="cpu").items()}
+            own = model.state_dict(); sd = {k: v for k, v in sd.items() if k in own and own[k].shape == v.shape}      # drops ds_emb when the dataset count differs
+            model.load_state_dict(sd, strict=False)
+            if args.freeze_encoders:
+                for n, prm in model.named_parameters(): prm.requires_grad = n.startswith(("head.", "ds_emb."))
+            if fold == 0: log(f"warm start from {p}: {len(sd)} tensors loaded, lr {lr}" + (", encoders frozen" if args.freeze_encoders else ""))
+        opt = torch.optim.AdamW([q for q in model.parameters() if q.requires_grad], lr=lr, weight_decay=1e-3); sched = torch.optim.lr_scheduler.OneCycleLR(opt, lr, total_steps=args.epochs * math.ceil(len(tr) / 16))
         dl_tr = torch.utils.data.DataLoader(PlotSet(idx.iloc[tr], True), batch_size=16, shuffle=True, collate_fn=collate, num_workers=0, drop_last=False)
         dl_te = torch.utils.data.DataLoader(PlotSet(idx.iloc[te], False), batch_size=16, shuffle=False, collate_fn=collate, num_workers=0)
         for ep in range(args.epochs):

@@ -85,6 +85,12 @@ class DeepTab(QWidget):
         self.sp_epochs = QSpinBox(); self.sp_epochs.setRange(5, 500); self.sp_epochs.setValue(100); self.sp_folds = QSpinBox(); self.sp_folds.setRange(2, 20); self.sp_folds.setValue(10)
         row = QHBoxLayout(); row.addWidget(QLabel("target")); row.addWidget(self.cb_target); row.addWidget(QLabel("variant")); row.addWidget(self.cb_variant); row.addWidget(QLabel("epochs")); row.addWidget(self.sp_epochs); row.addWidget(QLabel("folds")); row.addWidget(self.sp_folds); row.addStretch(); f3.addRow("Options:", row)
         row = QHBoxLayout(); self.ed_weights = QLineEdit(pretrained_weights_dir()); b = QPushButton("Browse..."); b.clicked.connect(lambda: self._pick_dir(self.ed_weights)); row.addWidget(self.ed_weights); row.addWidget(b); f3.addRow("Weights folder:", row)
+        self.cb_finetune = QCheckBox("Fine-tune: warm start the training from the weights folder (pretrained ensemble) instead of random weights")
+        self.cb_finetune.setChecked(True)
+        self.cb_finetune.setToolTip("Training only. The encoders and the head of the matching fold model are loaded, the trial/stage embedding is re-initialised for the "
+                                    "new dataset(s), and the peak learning rate is lowered to 3e-4. Use it when the new trial has fewer than a few hundred labelled plots; "
+                                    "untick to train from scratch. Band policy: the common 111-band list shipped with the ensemble.")
+        f3.addRow("", self.cb_finetune)
         row = QHBoxLayout(); self.btn_pred = QPushButton("Predict with pretrained ensemble"); self.btn_pred.clicked.connect(lambda: self._run("predict"))
         self.btn_train = QPushButton("Train / cross-validate on this trial"); self.btn_train.clicked.connect(lambda: self._run("train")); row.addWidget(self.btn_pred); row.addWidget(self.btn_train); row.addStretch(); f3.addRow("", row)
         v.addWidget(g3)
@@ -139,7 +145,9 @@ class DeepTab(QWidget):
         s = state(); base = os.path.splitext(s.out_csv)[0] if s.out_csv else os.path.join(data, "dl")
         out = base + f"_dl_{target}_{variant}_pretrained_predictions.csv" if mode == "predict" else base + f"_dl_{target}_training"
         self.btn_pred.setEnabled(False); self.btn_train.setEnabled(False); self.out.append(f"\n=== {mode}: target {target}, variant {variant}, device {device}")
-        self._rn = _Run(exe, mode, data, out, target=target, device=device, variant=variant, weights=self.ed_weights.text().strip() or None, epochs=self.sp_epochs.value(), folds=self.sp_folds.value())
+        wdir = self.ed_weights.text().strip() or None
+        self._rn = _Run(exe, mode, data, out, target=target, device=device, variant=variant, weights=wdir, epochs=self.sp_epochs.value(), folds=self.sp_folds.value(),
+                        init=(wdir or pretrained_weights_dir()) if (mode == "train" and self.cb_finetune.isChecked()) else None)
         self._rn.line.connect(self.out.append)
         self._rn.done_ok.connect(lambda rc: (self.btn_pred.setEnabled(True), self.btn_train.setEnabled(True), self.out.append(f"finished (exit code {rc}) -> {out}")))
         self._rn.start()
