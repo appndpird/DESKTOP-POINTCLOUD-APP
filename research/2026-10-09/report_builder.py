@@ -152,7 +152,9 @@ for lab, folder in (("height", HP), ("biomass", BM)):
     if os.path.exists(pcf):
         html += [f"<h3>Principal components kept per block ({lab} models, fitted on all plots for reference)</h3>", table_html(pd.read_csv(pcf), "{:.3f}")]
 if H is not None:
-    html += ["<h2>3. Plant height (Muresk, ruler at maturity, n = 128 per flight)</h2>", img("h_bar"), "<h3>Best model per feature family (held-out predictions, repeated 10-fold)</h3>", table_html(H),
+    html += ["<h2>3. Plant height (Muresk; ground truth = one ruler measurement per plot taken at maturity, n = 128, used as the target for both flights)</h2>",
+             "<div class='warn'><b>Ground truth caveat.</b> Muresk has a single ruler height per plot, measured at maturity. The models of the 2025-09-30 flight therefore predict the <i>final</i> (maturity) plant height from anthesis-flight features; they are not validated against a height measured at anthesis. "
+             "The assumption is that stem elongation was complete by anthesis (the normal case in wheat); it is supported by the anthesis flight agreeing with the ruler better than the maturity flight does (lodging and bending reduce the LiDAR top later), but a ruler reading on the day of each flight would be the proper ground truth. The AGT trial has no height ground truth.</div>", img("h_bar"), "<h3>Best model per feature family (held-out predictions, repeated 10-fold)</h3>", table_html(H),
              img("h_2025-09-30"), img("h_2025-11-21"), "<h3>Leave-one-out for the top models and the cth_p95 reference</h3>", table_html(Rl),
              "<h3>Transfer between dates (train one flight, test the other): RMSE cm</h3>", table_html(Rt.reset_index()), "<h3>Which features matter</h3>", img("h_imp"), "<h3>All height models</h3>", table_html(full_h)]
 else:

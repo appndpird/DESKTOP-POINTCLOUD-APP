@@ -518,7 +518,11 @@ be left out of any analysis or model, never filled.
 **Height Models tab** gained the v3 sets: LiDAR core (21 canopy features) and LiDAR + VNIR (43 features) with PLS,
 ridge, Gaussian process and random forest, each with random-forest top-10 feature selection inside every training
 fold, and repeated 10-fold (5x) validation as the default. On the validation trial: anthesis R2 0.50-0.51 / RMSE 3.6 cm;
-maturity LiDAR+VNIR R2 0.48 / 3.7 cm against 0.25 / 4.4 cm for the single cth_p95 calibration.
+maturity LiDAR+VNIR R2 0.48 / 3.7 cm against 0.25 / 4.4 cm for the single cth_p95 calibration. Note on the ground truth:
+that trial has one ruler measurement per plot, taken at maturity. The "anthesis" height models therefore predict the
+final (maturity) plant height from the anthesis flight, on the assumption that stem elongation was complete by anthesis,
+which is the normal case in wheat and is supported by the anthesis flight agreeing with the ruler better than the
+maturity flight does. A ruler reading taken on the day of each flight is the proper ground truth when it exists.
 
 **Biomass ML tab (new).** Fused LiDAR v3 + VNIR v3 features (plus CHM-weighted indices: index x cover, index x H95,
 NDRE x PVI) against any per-plot target (default biomass_kg_ha); families LiDAR_core / VNIR_core / Fused_core /

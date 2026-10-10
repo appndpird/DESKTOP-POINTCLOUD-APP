@@ -12,7 +12,10 @@ dataset\
   workbooks\                      trial workbooks (per-flight Spectra, VNIR, Bands_QC and Bands_ValidFrac sheets, NaN rule applied)
   <trial>\<flight>\
     ground_truth.csv              one row per plot with a measurement: Plot_ID, Plot, design columns (Range, Row, Block, Rep, N treatment,
-                                  Variety ...), biomass_<stage>_kg_ha, biomass_kg_ha (= the target of this flight's stage), height_cm, height_source
+                                  Variety ...), biomass_<stage>_kg_ha, biomass_kg_ha (= the target of this flight's stage), height_cm, height_source.
+                                  NOTE height: Muresk has ONE ruler measurement per plot, taken at maturity; the same value is the height target of
+                                  both Muresk flights (height_source says so), i.e. the anthesis-flight height models predict the final height.
+                                  AGT has no height ground truth.
     features_lidar.csv            v3.2 LiDAR features for every plot of the grid (97 columns): qc_ok, counts, noise rule, ground plane quality,
                                   canopy-only percentiles (H50..H999, top-N mean), canopy-top P90/P95/P99, cover (5 cm, 2 cm, interior), gap fraction
                                   and 20 cm gap layers (whole polygon and 20 cm interior), LAI proxy, voxel volume, profile area, rumple, roughness,

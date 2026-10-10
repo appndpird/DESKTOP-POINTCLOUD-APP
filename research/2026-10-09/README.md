@@ -35,6 +35,14 @@ Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10
   Per-plot VNIR files for the two AGT flight-2 plots 1001 / 1024 still lack 4 / 1 edge pixels (writer defect fixed in
   v3.0.1; regenerate on a machine with GDAL).
 
+## Ground truth caveat for height
+Muresk has a single ruler height per plot, measured at maturity, and it is the target of BOTH Muresk flights (`height_source`
+in `dataset\muresk\<flight>\ground_truth.csv`). The "anthesis" height models therefore predict the final (maturity) plant
+height from the 2025-09-30 flight; they are not validated against a height measured at anthesis. The assumption (stem
+elongation complete by anthesis) is the normal case in wheat and is consistent with the anthesis flight agreeing with the
+ruler better than the maturity flight, but a ruler reading on the day of each flight is the proper ground truth. AGT has
+no height measurements.
+
 ## Two-stream network: results of the overnight runs (9-10 Oct 2026)
 
 Two complete runs, each 10-fold CV stratified by dataset, 100 epochs per fold, three variants (two_stream = LiDAR + VNIR,

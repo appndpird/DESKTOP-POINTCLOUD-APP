@@ -67,7 +67,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter'],
+    # torch / spconv are NOT bundled: the Deep Models tab runs the network in an external Python environment
+    # (core.deep_models probes it); bundling them added 3.3 GB of CUDA DLLs to the folder (v3.3.2 build of 10 Oct 2026)
+    excludes=['tkinter', 'torch', 'torchvision', 'torchaudio', 'triton', 'functorch', 'torchgen', 'spconv', 'cumm', 'pccm', 'ccimport'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
