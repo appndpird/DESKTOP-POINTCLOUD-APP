@@ -35,6 +35,40 @@ Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10
   Per-plot VNIR files for the two AGT flight-2 plots 1001 / 1024 still lack 4 / 1 edge pixels (writer defect fixed in
   v3.0.1; regenerate on a machine with GDAL).
 
+## Two-stream network: results of the overnight runs (9-10 Oct 2026)
+
+Two complete runs, each 10-fold CV stratified by dataset, 100 epochs per fold, three variants (two_stream = LiDAR + VNIR,
+lidar_only, vnir_only), biomass on 760 plots and height on 256 plots, GPU 1 (TITAN Xp), the two runs sharing the GPU
+from 18:00: **per-plot bands** (every band usable on the plot, availability mask given to the network) and **common
+bands** (the fixed list of 111 bands usable on >= 95 % of the plots of every reflectance flight, `dataset\vnir_common_bands.csv`,
+`--bands common`). Held-out scores per dataset (`two_stream\results\dl_*_comparison.csv`):
+
+| Target / dataset | two_stream per-plot | two_stream common | lidar_only per-plot | lidar_only common | vnir_only (both) | best feature model |
+|---|---|---|---|---|---|---|
+| Biomass, Muresk anthesis (n 128) | R2 0.23 / 1,673 | **0.27 / 1,636** | 0.32 / 1,573 | 0.29 / 1,609 | ~0 | 0.37 / 1,513 (Fused_PCA_joint GPR) |
+| Biomass, Muresk maturity (128) | 0.07 / 1,388 | **0.13 / 1,340** | 0.14 / 1,332 | 0.13 / 1,342 | ~0 | 0.27 / 1,237 (Fused_bands_PCA LightGBM) |
+| Biomass, AGT anthesis (252) | 0.06 / 1,475 | **0.07 / 1,467** | 0.10 / 1,444 | 0.09 / 1,450 | ~0 | 0.19 / 1,374 (Fused_bands_PCA Ridge) |
+| Biomass, AGT maturity (252, LiDAR only) | 0.03 / 1,867 | **0.05 / 1,848** | 0.02 / 1,877 | 0.03 / 1,870 | ~0 | 0.06 / 1,847 (LiDAR_PCA Ridge) |
+| Height, Muresk anthesis (128) | 0.47 / 3.70 cm | 0.46 / 3.74 cm | 0.44 / 3.80 cm | 0.41 / 3.9 cm | ~0 | 0.59 / 3.26 cm (joint PCA Ridge) |
+| Height, Muresk maturity (128) | 0.35 / 4.11 cm | 0.35 / 4.10 cm | 0.37 / 4.03 cm | 0.41 / 3.9 cm | ~0 | 0.55 / 3.42 cm (joint PCA Ridge) |
+
+(R2 / RMSE in kg/ha or cm; the pooled "ALL" rows of the CSVs, R2 0.53-0.55 for biomass, are inflated by the between-dataset
+differences in mean biomass and are not comparable with the per-dataset values.)
+
+Reading: (1) the network is below the fused PCA feature models on every dataset and both targets at this sample size;
+(2) the spectral stream alone carries no within-dataset signal (vnir_only R2 about 0 everywhere; its pooled R2 comes from
+learning the dataset means), and the fused network is at best equal to LiDAR-only; (3) the common band list is equal or
+better than the per-plot policy for the fused network (anthesis 0.27 vs 0.23, maturity 0.13 vs 0.07 at Muresk) and equal
+for height, consistent with the per-plot availability pattern acting as a trial fingerprint rather than as information.
+**Decision (agreed with the user on 9 Oct): the common 111-band list is the standard band policy**; `dl_twostream.py`
+defaults to `--bands common`, the tool's runner applies the ensemble's `common_bands.csv` automatically, and the bundled
+pretrained ensembles of PhenoApp v3.3.2 are the common-band fold models (`two_stream_<target>_fold0-4.pt`,
+`lidar_only_<target>_fold0-4.pt`, float16).
+
+Timing per fold on the shared TITAN Xp: biomass two_stream 36-46 min, lidar_only 32-39 min, vnir_only 15 min; height
+two_stream 10-18 min, lidar_only 9-17 min, vnir_only 5 min; the per-plot run took 16:43 to 13:08 (biomass 15 h, height 5.3 h),
+the common run 18:00 to about 14:30 the next day. The first fold of a run includes a few minutes of spconv kernel compilation.
+
 ## Environment notes (this machine, 9 Oct 2026)
 - Feature pipeline: Python venv `C:\Users\appn\phenoapp-venv` (3.12; numpy, pandas, scipy, scikit-learn, xgboost, lightgbm,
   laspy, shapely, tifffile). An application-control policy blocked the DLLs of fiona, pyogrio and rasterio, so: shapefiles are

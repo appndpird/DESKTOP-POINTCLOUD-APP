@@ -15,7 +15,7 @@ import json
 
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton, QLabel, QProgressBar, QFileDialog,
-                             QMessageBox, QLineEdit, QTextEdit, QFormLayout, QComboBox, QSpinBox)
+                             QMessageBox, QLineEdit, QTextEdit, QFormLayout, QComboBox, QSpinBox, QCheckBox)
 
 from phenoapp.core.project import state
 from phenoapp.core import load_grid, LASManager, VNIRCube

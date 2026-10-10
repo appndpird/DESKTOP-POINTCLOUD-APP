@@ -1,0 +1,13 @@
+{
+ "target": "height_cm",
+ "epochs": 100,
+ "folds": 10,
+ "maxpts": 16000,
+ "variants_this_run": "two_stream,lidar_only,vnir_only",
+ "device": "cuda:1",
+ "n": 256,
+ "band_policy": "common",
+ "n_common_bands": 111,
+ "augmentation": "train only: random 180-deg rotation, mirror across the row axis, 0-30 % point dropout, 1 cm xy jitter; pixel bootstrap + 0.9-1.1 brightness",
+ "band_policy_note": "per_plot: band_mask (vnir_band_usable) AND pixel > 0 AND not excluded; common: fixed common_95 list AND pixel > 0; masked bands zero after SNV; availability mask appended to the embedding"
+}
