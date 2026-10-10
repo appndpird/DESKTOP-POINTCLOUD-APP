@@ -1,6 +1,11 @@
 # Plant Phenotyping from Point Clouds
 
-**Current version: PhenoApp v3.3.1 (2026-10-09)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
+**Current version: PhenoApp v3.3.2 (2026-10-10)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
+**Windows executable:** GitHub Releases, tag `v3.3.2`, asset `PhenoApp_v3.3.2_win64.zip` (456 MB; unzip and run
+`PhenoApp_v3\PhenoApp_v3.exe`; no Python needed except for the Deep Models tab, which uses an external torch environment).
+Build it yourself with `phenoapp_v3.3_2026-10-09/build_windows.bat` (PyInstaller, `phenoapp.spec`; torch is excluded on purpose).
+Saved models (feature models and two-stream ensembles): `research/2026-10-09/models/`.
+v3.3.2 bundles the common-band two-stream ensembles and the fine-tune option.
 v3.3.1 adds the PCA feature families (LiDAR, VNIR, fused per modality, joint, spectral-band) to the Biomass ML tab and the
 matching PCA sets to the Height Models tab. `USER_GUIDE.md` is the end-to-end recipe for training, testing and inference
 (feature extraction, Height Models and Biomass ML tabs, applying saved models to another flight, offsets, command line,
