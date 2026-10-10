@@ -20,7 +20,8 @@ why torch is not inside the executable.
 - No trial or dataset names in the tool.
 
 ## Validation (held out, 9-10 October 2026 rebuild)
-Height: joint PCA ridge R2 0.59 / 3.3 cm (anthesis), 0.55 / 3.4 cm (maturity); network 3.7 / 4.1 cm.
+Height (maturity flight, the only flight with a ruler measurement): joint PCA ridge R2 0.55 / 3.4 cm; the anthesis flight
+is reported as a predicted height with the maturity-minus-anthesis difference, not as an error score.
 Biomass: fused PCA R2 0.37 / 1,513 kg/ha (anthesis), 0.27 / 1,237 (maturity) on the trial with ruler heights;
 network 0.27 / 1,636 and 0.13 / 1,340. Details: research/2026-10-09/REPORT_height_biomass_2026-10-09.html.
 

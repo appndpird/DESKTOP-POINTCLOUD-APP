@@ -1,0 +1,109 @@
+{
+ "model": {
+  "feature_set": "LiDAR_core",
+  "learner": "GPR",
+  "trained_on": "2025-11-21 (maturity flight, ruler at maturity)",
+  "maturity_cv": {
+   "R2": 0.431,
+   "RMSE": 3.84
+  },
+  "file": "height_LiDAR_core_GPR_2025-11-21.joblib"
+ },
+ "predicted_anthesis_height_cm": {
+  "n": 128,
+  "mean": 71.79,
+  "sd": 3.69,
+  "median": 71.66,
+  "p10": 67.38,
+  "p90": 76.54
+ },
+ "ruler_maturity_cm": {
+  "n": 128,
+  "mean": 84.66,
+  "sd": 5.11,
+  "median": 85.0,
+  "p10": 79.0,
+  "p90": 90.0
+ },
+ "ruler_maturity_minus_predicted_anthesis_cm": {
+  "n": 128,
+  "mean": 12.87,
+  "sd": 4.46,
+  "median": 13.1,
+  "p10": 7.76,
+  "p90": 17.89
+ },
+ "cth_p95_maturity_minus_anthesis_cm": {
+  "n": 128,
+  "mean": 10.23,
+  "sd": 4.62,
+  "median": 9.21,
+  "p10": 4.93,
+  "p90": 16.47
+ },
+ "predicted_maturity_minus_predicted_anthesis_cm": {
+  "n": 128,
+  "mean": 12.87,
+  "sd": 3.47,
+  "median": 12.87,
+  "p10": 8.7,
+  "p90": 17.83
+ },
+ "cth_calibration": {
+  "fitted_on": "2025-11-21",
+  "intercept_cm": 52.54,
+  "slope": 0.424,
+  "predicted_anthesis_cm": {
+   "n": 128,
+   "mean": 80.32,
+   "sd": 1.63,
+   "median": 80.51,
+   "p10": 78.06,
+   "p90": 82.16
+  },
+  "ruler_maturity_minus_predicted_anthesis_cm": {
+   "n": 128,
+   "mean": 4.33,
+   "sd": 4.14,
+   "median": 4.7,
+   "p10": -1.27,
+   "p90": 8.74
+  }
+ },
+ "why_lidar_only": "VNIR features of a senesced canopy (maturity) and a green canopy (anthesis) differ by >100 sd (red-edge indices); a maturity model using them extrapolates to nonsense on the anthesis flight (joint PCA ridge gave a mean of -33 cm), so only LiDAR-structure models are applied across dates.",
+ "by_N_treatment": {
+  "100N": {
+   "n": 32,
+   "mean": 13.85,
+   "sd": 4.12,
+   "median": 14.7,
+   "p10": 8.47,
+   "p90": 18.17
+  },
+  "10N": {
+   "n": 32,
+   "mean": 14.2,
+   "sd": 3.4,
+   "median": 13.93,
+   "p10": 10.59,
+   "p90": 17.83
+  },
+  "150N": {
+   "n": 32,
+   "mean": 11.36,
+   "sd": 4.63,
+   "median": 11.35,
+   "p10": 4.59,
+   "p90": 16.58
+  },
+  "50N": {
+   "n": 32,
+   "mean": 12.07,
+   "sd": 5.07,
+   "median": 12.44,
+   "p10": 6.08,
+   "p90": 17.1
+  }
+ },
+ "note": "No height was measured at anthesis, so the anthesis values are predictions and the differences are not error metrics."
+}

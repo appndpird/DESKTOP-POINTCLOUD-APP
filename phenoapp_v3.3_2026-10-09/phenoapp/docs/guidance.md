@@ -426,16 +426,18 @@ plot-local ground instead:
 6. quality flags: `cth_cover`, `cth_ground_cells`, `cth_ground_rms`,
    `cth_ground_offset` (local minus trial-wide ground), `cth_n_noise`, `cth_ok`.
 
-Wheat trial, ruler heights at maturity: on the anthesis flight
-the trial-wide ground drifted 10 cm between ranges and `h_p99` reached only
-r 0.31; `cth_p95` on the plot-local ground reached r 0.68, error SD 3.8 cm,
-slope 0.89, range drift 2.7 cm, which is at the noise level of the ruler
-itself (about 4 cm; two flights agree with each other at r 0.84 but each
-agrees with the ruler at no better than 0.56-0.69). On the maturity flight the
-alleys had been disturbed and the local ground was no better than the
-trial-wide surface: watch `cth_ground_offset`, and if it varies by more than
-about 5 cm across the trial, prefer the trial-wide option or an earlier
-flight.
+Wheat trial, one ruler height per plot measured at maturity. On the maturity
+flight (the only flight with a measurement of its own) `cth_p95` on the
+plot-local ground correlates with the ruler at r 0.50 and the linear
+calibration reaches LOOCV R2 0.23 / RMSE 4.5 cm; the alleys had been
+disturbed by then and the local ground was no better than the trial-wide
+surface, so watch `cth_ground_offset`, and if it varies by more than about
+5 cm across the trial, prefer the trial-wide option. On the anthesis flight,
+where the canopy was still about 10 cm below its final height, the
+plot-local ground raised the correlation of the LiDAR top with the final ruler
+height from 0.31 (`h_p99`, trial-wide ground, 10 cm range drift) to 0.70
+(`cth_p95`); that is a ranking agreement only, because no ruler was taken at
+anthesis, and no error metric is quoted for that flight.
 
 **Why LiDAR reads below the ruler without calibration.** The ruler is held to
 the tip of the tallest heads at a few spots; the LiDAR canopy-top statistic
@@ -462,7 +464,7 @@ ticked, validated leave-one-out or 5-fold:
 
 | Model | Features | When to use |
 |---|---|---|
-| Linear calibration on `cth_p95` | 1 | reporting within a trial; the reference (LOOCV 3.8 cm on the validation trial, at the ruler's noise floor) |
+| Linear calibration on `cth_p95` | 1 | reporting within a trial; the reference (LOOCV 4.5 cm, R2 0.23 on the validation flight, ruler taken on the day) |
 | Ridge, 7 structure features | cth_p95, tip thinness, cth_cover, cover_frac, roughness, vertical spread, point density | best within a flight by 0.1-0.4 cm; does not transfer |
 | Random forest, 7 structure features | same | the model to carry to another date or trial (5.3 cm raw, 4.9 cm with a per-flight offset) |
 | XGBoost, 7 structure features, monotone in cth_p95 | same | alternative boosted model (needs the xgboost package) |
@@ -517,12 +519,11 @@ be left out of any analysis or model, never filled.
 
 **Height Models tab** gained the v3 sets: LiDAR core (21 canopy features) and LiDAR + VNIR (43 features) with PLS,
 ridge, Gaussian process and random forest, each with random-forest top-10 feature selection inside every training
-fold, and repeated 10-fold (5x) validation as the default. On the validation trial: anthesis R2 0.50-0.51 / RMSE 3.6 cm;
-maturity LiDAR+VNIR R2 0.48 / 3.7 cm against 0.25 / 4.4 cm for the single cth_p95 calibration. Note on the ground truth:
-that trial has one ruler measurement per plot, taken at maturity. The "anthesis" height models therefore predict the
-final (maturity) plant height from the anthesis flight, on the assumption that stem elongation was complete by anthesis,
-which is the normal case in wheat and is supported by the anthesis flight agreeing with the ruler better than the
-maturity flight does. A ruler reading taken on the day of each flight is the proper ground truth when it exists.
+fold, and repeated 10-fold (5x) validation as the default. On the validation trial (ruler measured at maturity, so the
+error metrics are reported on the maturity flight only): LiDAR + VNIR joint PCA R2 0.55 / RMSE 3.4 cm against 0.23 /
+4.5 cm for the single cth_p95 calibration. Rule for flights without a height measurement on the day: apply the model
+of the measured flight, report the predicted height and the difference between dates (growth, lodging), and do not quote
+RMSE or R2 for them. Only a ruler reading taken on the day of a flight validates that flight.
 
 **Biomass ML tab (new).** Fused LiDAR v3 + VNIR v3 features (plus CHM-weighted indices: index x cover, index x H95,
 NDRE x PVI) against any per-plot target (default biomass_kg_ha); families LiDAR_core / VNIR_core / Fused_core /
@@ -560,9 +561,9 @@ points" is ticked; every metric ignores them either way.
 
 Why the default changed: on the validation flight (30,000 pts/m2, single-return Ouster) the gap
 rule flagged a single point in the whole trial, while every statistical-outlier variant removed sparse canopy tips (heads
-and awns): 0.3 % of points at 5 sd, 1.5 % at 3 sd, about half of them in the top 5 % of the canopy. Against the ruler
-heights the canopy-top P95 scored r 0.70 / LOOCV RMSE 3.70 cm unfiltered, 0.69 / 3.76 cm with the legacy filter, 0.68 /
-3.79 cm at 5 sd and 0.66 / 3.88 cm at 3 sd. A global neighbour-distance threshold flags wherever points are naturally
+and awns): 0.3 % of points at 5 sd, 1.5 % at 3 sd, about half of them in the top 5 % of the canopy. The agreement of
+the canopy-top P95 with the plots' final ruler height (correlation, anthesis flight) fell from r 0.70 unfiltered to 0.69
+with the legacy filter, 0.68 at 5 sd and 0.66 at 3 sd. A global neighbour-distance threshold flags wherever points are naturally
 sparse, and in a cereal canopy that is the top. Use an SOR only for clouds with genuine multipath or air returns, or
 apply it below the 90th height percentile.
 
@@ -597,8 +598,8 @@ fold models per target, trained on wheat plots at anthesis and maturity; predict
 written to <metrics>_dl_<target>_<variant>_pretrained_predictions.csv, with metrics when a ground truth was
 given) or trains and cross-validates the network on the current trial (fold weights, CV predictions and a
 JSON summary in <metrics>_dl_<target>_training). Expect the feature models to be as good or better until
-several hundred labelled plots per crop are available: on the validation trial the network reached biomass R2 0.22
-against 0.35 for the fused ridge, and height 3.9 cm against 3.6 cm.
+several hundred labelled plots per crop are available: on the validation trial the feature models stayed ahead of the
+network for biomass (R2 0.37 against 0.27 at anthesis) and for height on the maturity flight (3.4 cm against 4.1 cm).
 
 ### Using the pretrained deep models, step by step
 
@@ -609,8 +610,9 @@ policy: `common_bands.csv` next to the weights lists the 111 bands used for ever
 965-1000 nm), and the runner applies it automatically. A prediction is the mean of the fold models; the spread between
 them is written next to it as an uncertainty. Use `lidar_only` for a flight without a usable reflectance cube. Held-out
 scores of these ensembles (10-fold, per dataset): biomass R² 0.27 / RMSE 1,636 kg/ha at anthesis and 0.13 / 1,340 at
-maturity on the trial with ruler heights, 0.07 / 1,467 and 0.05 / 1,848 on the second trial; height 3.7 cm at anthesis,
-4.1 cm at maturity. The LiDAR-only ensemble scores the same within the noise, and the VNIR-only variant carries no
+maturity on the trial with ruler heights, 0.07 / 1,467 and 0.05 / 1,848 on the second trial; height 4.1 cm on the
+maturity flight (the only flight with a ruler measurement; a rerun with folds grouped by plot is reported in the research
+README). The LiDAR-only ensemble scores the same within the noise, and the VNIR-only variant carries no
 within-trial signal at this sample size, so the spectral stream is kept for its small gain at anthesis, not as a model
 on its own.
 
@@ -640,7 +642,7 @@ on its own.
    the trial's own offset is still unknown: compare the predictions with a few measured plots and apply an offset, or
    treat the output as a ranking. Within a trial with its own ground truth, the feature models of the Height Models and
    Biomass ML tabs were better in every test so far (biomass R² 0.37 against 0.27 for the network at anthesis; height
-   3.3 cm against 3.7 cm).
+   3.4 cm against 4.1 cm on the maturity flight).
 6. **Train or cross-validate on your own plots.** With a ground-truth CSV, "Train / cross-validate on this trial" runs
    k-fold cross-validation (default 10 folds, 100 epochs per fold, training-time augmentation: random 180-degree
    rotation, mirror across the row axis, 0-30 % point dropout, 1 cm jitter, pixel bootstrap and a 0.9-1.1 brightness

@@ -99,7 +99,8 @@ class HeightTab(QWidget):
             "Uses the per-plot metrics of the Traits tab (compute the canopy-top cth_* heights, cover fraction, roughness, "
             "point density and the percentile heights first). Fits the chosen models to measured plant height, validates them "
             "with every plot held out, and saves predictions and models to disk. Within a trial the linear calibration on "
-            "cth_p95 is usually already at the ruler's noise floor; the random forest is the one to carry to another date."))
+            "cth_p95 is the reference; the fused PCA and random forest models are the ones to carry to another date. Validate only against a "
+            "height measured on the day of the flight: a model applied to a flight without its own measurement gives a predicted height, not an error score."))
 
         g = QGroupBox("Inputs"); f = QFormLayout(g)
         row = QHBoxLayout(); self.ed_metrics = QLineEdit()

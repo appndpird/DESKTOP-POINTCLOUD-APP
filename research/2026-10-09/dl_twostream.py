@@ -19,7 +19,7 @@ try:
     import spconv.pytorch as spconv
 except Exception:          # spconv missing: only the vnir_only variant can run (LiDAR variants are skipped with a log line)
     spconv = None
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 ap = argparse.ArgumentParser(); ap.add_argument("--target", default="biomass"); ap.add_argument("--epochs", type=int, default=100)
 ap.add_argument("--variants", default="two_stream,lidar_only,vnir_only"); ap.add_argument("--folds", type=int, default=10); ap.add_argument("--maxpts", type=int, default=16000)
 ap.add_argument("--device", default="cuda:0")
@@ -29,8 +29,13 @@ ap.add_argument("--init", default=None, help="warm start (fine-tuning): folder o
                                              "encoders and head are loaded, the trial/stage embedding is re-initialised when the number of datasets differs")
 ap.add_argument("--init-lr", type=float, default=3e-4, help="peak learning rate when warm-starting (default 3e-4; 1e-3 from scratch)")
 ap.add_argument("--freeze-encoders", action="store_true", help="with --init: train only the head and the embedding (for very small new datasets)")
+ap.add_argument("--group-by-plot", dest="group_by_plot", action="store_true", default=True,
+                help="(default) folds keep every sample of a physical plot (trial + Plot_ID, i.e. both flights) together, so a plot is never in the training set while its other flight is in the test set")
+ap.add_argument("--no-group-by-plot", dest="group_by_plot", action="store_false", help="plain stratified folds by sample (the runs of 9-10 Oct 2026 used this; optimistic for height, where both flights share one ruler value per plot)")
+ap.add_argument("--tag", default="", help="suffix appended to the output file names (e.g. _grouped)")
+ap.add_argument("--datasets", default=None, help="comma-separated dataset names to use (default: every dataset with the target); e.g. muresk_maturity for height, where only the maturity flight has a ruler measurement")
 args = ap.parse_args()
-TAG = "" if args.bands == "per_plot" else "_commonbands"      # output files of the common-band run sit next to the per-plot ones
+TAG = ("" if args.bands == "per_plot" else "_commonbands") + args.tag      # output files of the common-band run sit next to the per-plot ones
 B = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment"
 OUT = os.path.join(B, "Biomass_Height_2026-10-09", "two_stream"); DATA = os.path.join(OUT, "dl_data"); RES = os.path.join(OUT, "results"); MOD = os.path.join(OUT, "models")
 os.makedirs(RES, exist_ok=True); os.makedirs(MOD, exist_ok=True)
@@ -44,6 +49,8 @@ VOX = 0.02; GRID = (256, 96, 96)      # x (along plot, 5.1 m), y (across, 1.9 m)
 idx = pd.read_csv(os.path.join(DATA, "index.csv"))
 tcol = "biomass_kg_ha" if args.target == "biomass" else "height_cm"
 idx = idx[idx[tcol].notna()].reset_index(drop=True)
+if args.datasets:
+    keep = [d.strip() for d in args.datasets.split(",")]; idx = idx[idx.dataset.isin(keep)].reset_index(drop=True); log(f"datasets restricted to {keep}")
 log(f"target {tcol}: {len(idx)} samples; per dataset {idx.dataset.value_counts().to_dict()}; plots with usable VNIR {int((idx.n_usable_bands > 0).sum())}")
 wl = np.load(os.path.join(DATA, idx.file[0]))["wavelengths"]
 EXCL = np.zeros(len(wl), bool)
@@ -131,7 +138,13 @@ def metrics(p, y):
 
 y_all = idx[tcol].to_numpy(float); ylog = args.target == "biomass"
 yt = np.log(y_all) if ylog else y_all; ymu, ysd = yt.mean(), yt.std()
-skf = StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=0)
+groups = (idx.trial.astype(str) + "_" + idx.Plot_ID.astype(str)).to_numpy()
+if args.group_by_plot:
+    skf = StratifiedGroupKFold(n_splits=args.folds, shuffle=True, random_state=0); splits = list(skf.split(idx, idx.dataset, groups))
+    log(f"folds: stratified by dataset AND grouped by physical plot ({len(set(groups))} plots) - both flights of a plot stay in the same fold")
+else:
+    skf = StratifiedKFold(n_splits=args.folds, shuffle=True, random_state=0); splits = list(skf.split(idx, idx.dataset))
+    log("folds: stratified by dataset, NOT grouped by plot (a plot's other flight may be in the training set)")
 rows, preds = [], []
 def _merge_csv(path, new):
     """Keep the rows of variants from earlier runs (e.g. vnir_only run before spconv was available); replace the current ones."""
@@ -143,7 +156,7 @@ for variant in args.variants.split(","):
     if spconv is None and variant != "vnir_only":
         log(f"skip {variant}: spconv is not installed in this environment"); continue
     pred = np.full(len(idx), np.nan)
-    for fold, (tr, te) in enumerate(skf.split(idx, idx.dataset)):
+    for fold, (tr, te) in enumerate(splits):
         model = TwoStream(variant, len(DSETS)).to(dev); lr = 1e-3
         if args.init:
             lr = args.init_lr; p = args.init

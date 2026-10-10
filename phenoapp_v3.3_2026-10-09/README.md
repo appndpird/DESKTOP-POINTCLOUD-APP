@@ -11,8 +11,8 @@ to the spectral stream (`2 x bands` inputs), and scores a dataset it was not tra
 the same stage, averaged. Training from the tab defaults to the common policy (`--bands common|per_plot`). Held-out
 10-fold scores of the full ensembles (research/2026-10-09/results_summary): biomass two-stream R2 0.27 / RMSE 1,636 kg/ha
 at anthesis and 0.13 / 1,340 at maturity on the trial with ruler heights, 0.07 / 1,467 and 0.05 / 1,848 on the second
-trial; height 3.7 cm (anthesis) and 4.1 cm (maturity). The feature models of the Height Models and Biomass ML tabs remain
-better within a trial (biomass 0.37 / 1,513; height 3.3 cm). The previous v3.1 weights are kept in
+trial; height: see the research README (metrics on the maturity flight only, the flight with the ruler measurement). The
+feature models of the Height Models and Biomass ML tabs remain better within a trial (biomass 0.37 / 1,513; height 3.4 cm). The previous v3.1 weights are kept in
 `phenoapp/assets/dl_models_v3.1_superseded/` (not bundled).
 
 **v3.3.1 (2026-10-09) - PCA feature families** (`phenoapp/core/pca_families.py`): the Biomass ML tab gains `LiDAR_PCA`,
@@ -38,8 +38,9 @@ without fiona/rasterio, PCA feature families, two-stream tensors with the per-pl
 the Traits tab gains a **Noise rule** selector (`gap` = points > 30 cm above the canopy, now the default; `none`;
 `legacy` upper-canopy SOR; `sor` k=10 at 3 or 5 sd) and a **Drop flagged noise points** box (default off: flagged
 points stay in the classified LAS as class 7 with the LAS *withheld* bit, so every reader can skip or recover them).
-Against ruler heights the SOR variants removed sparse heads/awns and lowered the cth_p95 agreement (r 0.70 / LOOCV
-3.70 cm unfiltered, 0.68 / 3.79 cm at 5 sd, 0.66 / 3.88 cm at 3 sd), while the gap rule flagged a single point.
+The SOR variants removed sparse heads/awns and lowered the correlation of cth_p95 with the plots' final ruler height
+(r 0.70 unfiltered, 0.68 at 5 sd, 0.66 at 3 sd; anthesis flight, ranking agreement only), while the gap rule flagged a
+single point.
 LiDAR v3 features add the 20 cm-interior gap metrics `Pgap_interior`, `LAI_proxy_interior`, `cover_2cm_interior`,
 `ground_visible_2cm_interior` (+ `cover_2cm`, `ground_visible_2cm`, `ground_edge_frac`, `Pgap_interior_below_*`): refit
 polygons include alley soil along the long sides (68 % of ground returns within 20 cm of the edge; Pgap 8.3 % whole vs

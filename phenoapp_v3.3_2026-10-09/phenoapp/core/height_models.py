@@ -1,15 +1,17 @@
 """
 Plant-height models: per-plot LiDAR features -> measured plant height.
 
-Validated on a wheat trial (two flights, ruler heights at maturity):
+Validated on a wheat trial whose ruler height was measured at maturity; error
+metrics refer to the maturity flight only (a flight without a ruler reading of
+its own gets a predicted height, not an error score):
 
-  cal_linear  : ruler = a + b x cth_p95.  Within a trial this is at the noise
-                floor of the ruler (LOOCV 3.8 cm); the reference model.
+  cal_linear  : ruler = a + b x cth_p95.  The reference model (LOOCV R2 0.23,
+                RMSE 4.5 cm on the validation flight).
   struct_ridge: ridge on 7 canopy-structure features (cth_p95, tip thinness,
                 cth_cover, cover_frac, roughness, vertical spread, point
-                density); best within-flight (3.7 cm) but transfers poorly.
-  struct_rf   : random forest on the same 7 features; the model that transfers
-                between dates (5.3 cm raw, 4.9 cm with a per-flight offset).
+                density); good within a flight, transfers poorly.
+  struct_rf   : random forest on the same 7 features; the model to carry to
+                another date, with a per-flight offset from a few measured plots.
   struct_xgb  : XGBoost on the same 7 features, monotone in cth_p95 (optional;
                 needs the xgboost package).
 

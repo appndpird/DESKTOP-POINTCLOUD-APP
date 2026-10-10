@@ -35,7 +35,11 @@ if os.path.exists(hp):
     sets = json.load(open(os.path.join(HP, "results", "feature_sets.json"))); hrows = []
     HFAMS = [f for f in ("LiDAR_core", "LiDAR_all", "LiDAR+VNIR", "LiDAR_PCA", "LiDAR+VNIR_PCA", "LiDAR+VNIR_PCA_joint", "VNIR_bands_PCA", "LiDAR+VNIR_bands_PCA") if (R.feature_set == f).any()]
     HCOL = {"LiDAR_core": C1, "LiDAR_all": C3, "LiDAR+VNIR": C2, "LiDAR_PCA": "#7a5cc7", "LiDAR+VNIR_PCA": "#c7407a", "LiDAR+VNIR_PCA_joint": "#8a6d3b", "VNIR_bands_PCA": "#e07be0", "LiDAR+VNIR_bands_PCA": "#2f9e9e"}
-    for fl in ("2025-09-30", "2025-11-21"):
+    # Error metrics are reported on the MATURITY flight only: Muresk has one ruler height per plot, measured at maturity.
+    # The anthesis flight is reported as a predicted height (height_anthesis_prediction.py), not as an error score.
+    HFL = ["2025-11-21"]
+    R = R[R.flight.isin(HFL) | R.scheme.str.startswith("leave_flight_out")]; P = P[P.flight.isin(HFL)]
+    for fl in HFL:
         A = R[(R.scheme == "repeated10fold") & (R.flight == fl)]
         fig, axs = plt.subplots(1, len(HFAMS), figsize=(5 * len(HFAMS), 4.8), dpi=110)
         for ax, fam in zip(np.atleast_1d(axs), HFAMS):
@@ -44,21 +48,25 @@ if os.path.exists(hp):
             m = scatter(ax, d.predicted.values, d.measured.values, f"{fl} {fam}: {b.learner} (repeated 10-fold)", "cm", HCOL[fam])
             hrows.append(dict(flight=fl, feature_set=fam, best_learner=b.learner, n_features=int(b.n_features), **{k: v for k, v in m.items() if k != "n"}))
         fig.tight_layout(); p = os.path.join(FIG, f"height_scatter_{fl}.png"); fig.savefig(p); plt.close(fig); figs[f"h_{fl}"] = p
-    fig, axs = plt.subplots(1, 2, figsize=(16, 5), dpi=110)
-    for ax, fl in zip(axs, ("2025-09-30", "2025-11-21")):
+    fig, axs = plt.subplots(1, len(HFL), figsize=(8 * len(HFL), 5), dpi=110)
+    for ax, fl in zip(np.atleast_1d(axs), HFL):
         A = R[(R.scheme == "repeated10fold") & (R.flight == fl)].pivot(index="learner", columns="feature_set", values="RMSE")[HFAMS]
-        A.plot.bar(ax=ax, color=[HCOL[f] for f in HFAMS], width=0.85); ax.set_ylabel("RMSE cm (repeated 10-fold)"); ax.set_title(f"Height, {fl}"); ax.grid(axis="y", alpha=.3); ax.tick_params(axis="x", rotation=30)
+        A.plot.bar(ax=ax, color=[HCOL[f] for f in HFAMS], width=0.85); ax.set_ylabel("RMSE cm (repeated 10-fold)"); ax.set_title(f"Height, {fl} (maturity flight, ruler at maturity)"); ax.grid(axis="y", alpha=.3); ax.tick_params(axis="x", rotation=30)
     fig.tight_layout(); p = os.path.join(FIG, "height_rmse_by_model.png"); fig.savefig(p); plt.close(fig); figs["h_bar"] = p
-    fig, axs = plt.subplots(1, 2, figsize=(14, 5), dpi=110)
-    for ax, fl in zip(axs, ("2025-09-30", "2025-11-21")):
+    fig, axs = plt.subplots(1, len(HFL), figsize=(7 * len(HFL), 5), dpi=110)
+    for ax, fl in zip(np.atleast_1d(axs), HFL):
         imp = pd.read_csv(os.path.join(HP, "results", f"rf_importance_LiDAR_VNIR_{fl}.csv")).head(15)
         ax.barh(imp.feature, imp.importance, color=[C2 if f.endswith(("_veg", "vnir")) or f.startswith(("refl", "spec_pc", "red_")) else C1 for f in imp.feature]); ax.invert_yaxis(); ax.set_title(f"RF importance, LiDAR+VNIR set, {fl} (blue LiDAR, orange VNIR)"); ax.grid(axis="x", alpha=.3)
     fig.tight_layout(); p = os.path.join(FIG, "height_importance.png"); fig.savefig(p); plt.close(fig); figs["h_imp"] = p
     H = pd.DataFrame(hrows)
-    Rl = R[R.scheme == "LOOCV"][["flight", "feature_set", "learner", "R2", "RMSE", "MAE", "r", "accuracy"]]
-    Rt = R[R.scheme.str.startswith("leave_flight_out")].pivot_table(index=["feature_set", "learner"], columns=["scheme", "flight"], values="RMSE").round(2)
-    full_h = R[R.scheme == "repeated10fold"][["flight", "feature_set", "learner", "n_features", "R2", "RMSE", "MAE", "r", "accuracy", "within5cm"]].sort_values(["flight", "RMSE"])
+    Rl = R[(R.scheme == "LOOCV") & R.flight.isin(HFL)][["flight", "feature_set", "learner", "R2", "RMSE", "MAE", "r", "accuracy"]]
+    Rt = None   # train-one-flight / test-the-other is not reported: the anthesis flight has no height measurement of its own
+    full_h = R[(R.scheme == "repeated10fold") & R.flight.isin(HFL)][["flight", "feature_set", "learner", "n_features", "R2", "RMSE", "MAE", "r", "accuracy", "within5cm"]].sort_values(["flight", "RMSE"])
     H.to_csv(os.path.join(HP, "results", "summary_best_per_family.csv"), index=False)
+    # anthesis flight: predicted height + difference to the maturity ruler (height_anthesis_prediction.py)
+    HA = None; hap = os.path.join(HP, "results", "anthesis_height_difference_summary.json")
+    if os.path.exists(hap):
+        HA = json.load(open(hap)); figs["h_anth"] = os.path.join(FIG, "height_anthesis_prediction.png")
 # ------------------------------------------------------------ biomass
 Bt = cross = pooled = skipped = None; DSETS = ["muresk_anthesis", "muresk_maturity", "agt_anthesis", "agt_maturity"]
 bp = os.path.join(BM, "results", "model_comparison.csv")
@@ -114,13 +122,19 @@ if os.path.exists(dlp):
     fig.tight_layout(); p = os.path.join(FIG, "biomass_dl_scatter_per_dataset.png"); fig.savefig(p); plt.close(fig); figs["b_dl2"] = p
     dl_rows = DLc[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
 dlh = os.path.join(DL, "results", "dl_height_comparison.csv")
-if os.path.exists(dlh): DLH = pd.read_csv(dlh)[["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
+if os.path.exists(dlh): DLH = pd.read_csv(dlh); DLH = DLH[DLH.dataset == "muresk_maturity"][["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
 # common-band run (--bands common): the same network with the fixed 111-band list for every plot
 DLCB = DLHCB = None
 dlcb = os.path.join(DL, "results", "dl_biomass_commonbands_comparison.csv")
 if os.path.exists(dlcb): DLCB = pd.read_csv(dlcb)[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
 dlhcb = os.path.join(DL, "results", "dl_height_commonbands_comparison.csv")
-if os.path.exists(dlhcb): DLHCB = pd.read_csv(dlhcb)[["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
+if os.path.exists(dlhcb): DLHCB = pd.read_csv(dlhcb); DLHCB = DLHCB[DLHCB.dataset == "muresk_maturity"][["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
+# grouped-fold reruns (folds keep both flights of a plot together; height on the maturity flight only): the valid two-stream scores
+DLG = DLHG = None
+dlg = os.path.join(DL, "results", "dl_biomass_commonbands_grouped_comparison.csv")
+if os.path.exists(dlg): DLG = pd.read_csv(dlg)[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
+dlhg = os.path.join(DL, "results", "dl_height_commonbands_grouped_maturity_comparison.csv")
+if os.path.exists(dlhg): DLHG = pd.read_csv(dlhg)[["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
 ncb = None
 cbp = os.path.join(M, "dataset", "vnir_common_bands.csv")
 if os.path.exists(cbp): ncb = int(pd.read_csv(cbp).common_95.sum())
@@ -152,11 +166,18 @@ for lab, folder in (("height", HP), ("biomass", BM)):
     if os.path.exists(pcf):
         html += [f"<h3>Principal components kept per block ({lab} models, fitted on all plots for reference)</h3>", table_html(pd.read_csv(pcf), "{:.3f}")]
 if H is not None:
-    html += ["<h2>3. Plant height (Muresk; ground truth = one ruler measurement per plot taken at maturity, n = 128, used as the target for both flights)</h2>",
-             "<div class='warn'><b>Ground truth caveat.</b> Muresk has a single ruler height per plot, measured at maturity. The models of the 2025-09-30 flight therefore predict the <i>final</i> (maturity) plant height from anthesis-flight features; they are not validated against a height measured at anthesis. "
-             "The assumption is that stem elongation was complete by anthesis (the normal case in wheat); it is supported by the anthesis flight agreeing with the ruler better than the maturity flight does (lodging and bending reduce the LiDAR top later), but a ruler reading on the day of each flight would be the proper ground truth. The AGT trial has no height ground truth.</div>", img("h_bar"), "<h3>Best model per feature family (held-out predictions, repeated 10-fold)</h3>", table_html(H),
+    hs = HA["ruler_maturity_minus_predicted_anthesis_cm"] if HA else None; hc = HA["cth_p95_maturity_minus_anthesis_cm"] if HA else None; hp_ = HA["predicted_anthesis_height_cm"] if HA else None
+    html += ["<h2>3. Plant height (Muresk, maturity flight 2025-11-21; ground truth = ruler at maturity, n = 128)</h2>",
+             "<div class='note'><b>What is validated and what is predicted.</b> Muresk has one ruler height per plot, measured at maturity, so RMSE, R² and the other error metrics are reported for the maturity flight only. "
+             "The anthesis flight (2025-09-30) has no height measurement; its height is <i>predicted</i> with the maturity-flight model and reported below as a predicted height with the difference to the maturity ruler, not as an error score. The AGT trial has no height ground truth.</div>",
+             img("h_bar"), "<h3>Best model per feature family (held-out predictions, repeated 10-fold, maturity flight)</h3>", table_html(H),
+             ("<h3>Anthesis flight: predicted height and the maturity-anthesis difference</h3>"
+              f"<p>Model applied to the anthesis-flight features: {HA['model']['feature_set']} / {HA['model']['learner']}, trained on the maturity flight (held-out R² {HA['model']['maturity_cv']['R2']}, RMSE {HA['model']['maturity_cv']['RMSE']} cm). "
+              f"Predicted anthesis height: mean {hp_['mean']} cm, sd {hp_['sd']} cm (n {hp_['n']}). Ruler at maturity minus predicted anthesis height: mean {hs['mean']} cm, sd {hs['sd']} cm, median {hs['median']} cm, 10th-90th percentile {hs['p10']} to {hs['p90']} cm. "
+              f"Model-free cross-check on the LiDAR canopy-top height (cth_p95, maturity minus anthesis): mean {hc['mean']} cm, sd {hc['sd']} cm. A difference near zero means the crop had reached its final height by the anthesis flight; a negative LiDAR difference at maturity reflects lodging and bending of the senesced canopy. These are differences between dates, not errors.</p>"
+              + img("h_anth")) if HA else "",
              img("h_2025-09-30"), img("h_2025-11-21"), "<h3>Leave-one-out for the top models and the cth_p95 reference</h3>", table_html(Rl),
-             "<h3>Transfer between dates (train one flight, test the other): RMSE cm</h3>", table_html(Rt.reset_index()), "<h3>Which features matter</h3>", img("h_imp"), "<h3>All height models</h3>", table_html(full_h)]
+             "<h3>Which features matter</h3>", img("h_imp"), "<h3>All height models (maturity flight)</h3>", table_html(full_h)]
 else:
     html += ["<h2>3. Plant height</h2><p>not run</p>"]
 if Bt is not None:
@@ -172,11 +193,15 @@ html += ["<h2>5. Two-stream deep network (sparse 3D CNN on the classified plot c
          "Training-time data augmentation, applied on the fly to every training plot: point cloud randomly rotated by 180° and mirrored across the row axis, 0-30 % of the points dropped at random, 1 cm xy jitter; spectral pixels bootstrap-resampled within the plot and scaled by a random brightness factor of 0.9-1.1. "
          "Nothing is augmented at test time, and the feature-based models use no augmentation (their regularisation is the nested selection, PCA and the ridge / PLS penalties). The pooled R² is inflated by the between-dataset differences in mean biomass; the per-dataset rows are the comparable numbers.</p>",
          img("b_dl"), img("b_dl2"), table_html(dl_rows) if dl_rows is not None else "<p>not run (torch / spconv unavailable at build time)</p>",
-         ("<h3>Same network for height (Muresk)</h3>" + table_html(DLH)) if DLH is not None else "",
+         "<div class='warn'><b>Fold caveat for the runs of 9-10 October.</b> Their 10 folds were stratified by dataset but not grouped by physical plot: in 246 of 256 height test cases and 708 of 760 biomass test cases the same plot's other flight was in the training set. "
+         "For height both flights share one ruler value per plot, so those height scores are optimistic and are superseded by the grouped rerun on the maturity flight below; for biomass the two stages have different cuts (r = 0.33 between a plot's anthesis and maturity biomass), so the effect is small, and the grouped rerun below replaces them where available.</div>",
+         (("<h3>Grouped-fold reruns (both flights of a plot in the same fold; common bands): the valid two-stream scores</h3>" + table_html(DLG)) if DLG is not None else "<p>Grouped-fold biomass rerun: in progress.</p>"),
+         (("<h4>Height, maturity flight only, grouped folds, common bands</h4>" + table_html(DLHG)) if DLHG is not None else "<p>Grouped-fold height rerun (maturity flight only): in progress.</p>"),
+         ("<h3>Same network for height (Muresk, maturity flight; per-plot bands, ungrouped folds - superseded)</h3>" + table_html(DLH)) if DLH is not None else "",
          (f"<h3>Common-band run: the same network with one fixed band list for every flight</h3><p>Band policy 'common': the {ncb} bands usable on at least 95 % of the ground-truth plots of every reflectance flight "
           "(522-645, 691-754, 772-926, 965-1000 nm; dataset\\vnir_common_bands.csv) are the spectral input of every plot, so no flight is represented by a different band set and the network cannot use band availability as a trial fingerprint. "
           "Blue and the red absorption well are dropped for all plots; clipped pixels are still ignored; the radiance flight stays LiDAR-only. Per-plot run above = most data per plot; common-band run = identical inputs across flights.</p>"
-          + table_html(DLCB) + (("<h4>Height, common bands</h4>" + table_html(DLHCB)) if DLHCB is not None else "")) if DLCB is not None else "",
+          + table_html(DLCB) + (("<h4>Height, common bands (maturity flight; ungrouped folds - superseded by the grouped rerun above)</h4>" + table_html(DLHCB)) if DLHCB is not None else "")) if DLCB is not None else "",
          "<h2>6. Files</h2><p class='small'>Everything is under Biomass Experiment\\Biomass_Height_2026-10-09: dataset\\ (per trial / flight: ground_truth.csv, features_lidar.csv, features_vnir.csv, vnir_spectra.csv, vnir_band_usable.csv, features_all.csv, lidar_classified\\, vnir\\), "
          "height\\ and biomass\\ (results\\, models\\), two_stream\\ (dl_data\\, results\\, models\\), figures\\, scripts\\ (build_dataset.py, dl_prepare.py, height_models.py, biomass_models.py, pca_families.py, dl_twostream.py, report_builder.py, grid_pyshp.py, vnir_envi.py) and README.md.</p>"]
 page = "\n".join(html)

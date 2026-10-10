@@ -8,9 +8,9 @@ Pipeline per plot (bounding window of the polygon + a 0.25-1.0 m alley ring, nei
        legacy  : canopy_top._sor_upper - SOR on the top 10 % of points (k=8, 2 sd) + points > 25 cm above p99.5
        sor     : statistical outlier removal on all points (k neighbours, mean distance > mean + nsig sd) + the gap rule
                  (the v3.0 default with k=10, nsig=3)
-     Validation against ruler heights (single-return cloud, 30,000 pts/m2): the gap rule flagged 1 point in the trial; every SOR
-     variant removed sparse canopy tips (heads/awns, 0.3-1.5 % of points, half of them in the top 5 % of the canopy) and
-     lowered the ruler agreement of cth_p95 (r 0.70 / LOOCV 3.70 cm unfiltered; 0.68 / 3.79 at 5 sd; 0.66 / 3.88 at 3 sd).
+     Validation (single-return cloud, 30,000 pts/m2): the gap rule flagged 1 point in the trial; every SOR variant removed
+     sparse canopy tips (heads/awns, 0.3-1.5 % of points, half of them in the top 5 % of the canopy) and lowered the
+     correlation of cth_p95 with the plots' final ruler height (r 0.70 unfiltered; 0.68 at 5 sd; 0.66 at 3 sd).
      Flagged points are KEPT and marked (class 7, withheld bit in written LAS) unless drop_noise=True; every metric
      ignores them either way.
   2. Classify ground      robust plane through the alley ring (25 cm cells, 5th percentile of z) refined
@@ -32,9 +32,10 @@ Pipeline per plot (bounding window of the polygon + a 0.25-1.0 m alley ring, nei
      the interior / 2 cm versions correlate better with biomass). At 30,000 pts/m2 cover_5cm saturates at 1.0 in half of
      the plots; cover_2cm_interior and ground_visible_2cm_interior replace it in LIDAR_V3_CORE.
 
-Validated against ruler heights on a wheat trial: canopy-only percentiles + canopy-top metrics + normalised
-intensity gave R2 0.50 / RMSE 3.6 cm with PLS or ridge (repeated 10-fold), and normalised canopy intensity
-was the strongest single biomass correlate at anthesis (r 0.47), as in Bates et al. (2026).
+Validated on a wheat trial with a ruler height taken at maturity: on that flight the canopy-only percentiles,
+canopy-top metrics and normalised intensity (with the VNIR features, PCA + ridge) gave R2 0.55 / RMSE 3.4 cm
+(repeated 10-fold); normalised canopy intensity was the strongest single biomass correlate at anthesis (r 0.47),
+as in Bates et al. (2026).
 
 Public API
 ----------

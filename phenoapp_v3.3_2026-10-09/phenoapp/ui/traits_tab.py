@@ -361,7 +361,7 @@ class TraitsTab(QWidget):
             "Ground reference for the canopy-top heights (cth_p90 etc.).\n\n"
             "Plot-local: a robust plane through 25 cm alley cells (5th percentile of z) in a "
             "0.25-1.0 m ring around each plot, neighbours excluded. Removes range-to-range drift "
-            "of a trial-wide surface (ruler agreement r 0.31 -> 0.69). Falls back "
+            "of a trial-wide surface (correlation with the plots' final ruler height 0.31 -> 0.70). Falls back "
             "to the trial-wide surface when the ring has too few cells (cth_ground_cells = 0).\n\n"
             "Trial-wide: the smooth exterior surface used for h_p95 / h_p99.")
         self.ed_targets = QLineEdit(); self.ed_targets.setPlaceholderText("reference targets CSV (optional): name,E,N,height_m[,radius_m]")
@@ -402,8 +402,8 @@ class TraitsTab(QWidget):
             "Which points are flagged as noise (class 7) before classification and features.\n\n"
             "Validated against ruler heights: the gap rule flagged a single point in a whole trial; "
             "every statistical-outlier variant removed sparse canopy tips (heads / awns; 0.3-1.5 % of points, half of them in "
-            "the top 5 % of the canopy) and lowered the ruler agreement of cth_p95 (r 0.70 / LOOCV 3.70 cm unfiltered, "
-            "0.68 / 3.79 cm at 5 sd, 0.66 / 3.88 cm at 3 sd). Flagged points are kept and marked unless the box below is ticked.")
+            "the top 5 % of the canopy) and lowered the correlation of cth_p95 with the plots' final ruler height (r 0.70 unfiltered, "
+            "0.68 at 5 sd, 0.66 at 3 sd). Flagged points are kept and marked unless the box below is ticked.")
         self.cb_drop_noise = QCheckBox("Drop flagged noise points from the classified LAS (default: keep them, class 7 + withheld bit)")
         self.cb_drop_noise.setChecked(False)
         self.cb_classified = QCheckBox("Write classified per-plot LAS (2 ground / 3 low veg / 5 canopy / 7 noise + withheld bit, HeightAboveGround, sidecar JSON)")

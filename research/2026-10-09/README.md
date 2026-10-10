@@ -35,13 +35,20 @@ Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10
   Per-plot VNIR files for the two AGT flight-2 plots 1001 / 1024 still lack 4 / 1 edge pixels (writer defect fixed in
   v3.0.1; regenerate on a machine with GDAL).
 
-## Ground truth caveat for height
-Muresk has a single ruler height per plot, measured at maturity, and it is the target of BOTH Muresk flights (`height_source`
-in `dataset\muresk\<flight>\ground_truth.csv`). The "anthesis" height models therefore predict the final (maturity) plant
-height from the 2025-09-30 flight; they are not validated against a height measured at anthesis. The assumption (stem
-elongation complete by anthesis) is the normal case in wheat and is consistent with the anthesis flight agreeing with the
-ruler better than the maturity flight, but a ruler reading on the day of each flight is the proper ground truth. AGT has
-no height measurements.
+## Height ground truth: maturity flight only (rule adopted 10 Oct 2026)
+Muresk has a single ruler height per plot, measured at maturity (2025-11-21). Error metrics (R2, RMSE, ...) for height are
+therefore reported for the maturity flight only. The anthesis flight (2025-09-30) has no height measurement: its
+`ground_truth.csv` and `features_all.csv` no longer carry a height column, no anthesis height model is shipped, and the
+earlier "anthesis height" scores (which compared anthesis-flight features with the maturity ruler) are withdrawn.
+Instead `height_anthesis_prediction.py` applies the best LiDAR-only maturity model (LiDAR_core / GPR, held-out R2 0.43,
+RMSE 3.8 cm) to the anthesis-flight features and reports the predicted anthesis height with the difference to the maturity
+ruler (`height\results\anthesis_predicted_height.csv`, `anthesis_height_difference_summary.json`,
+`figures\height_anthesis_prediction.png`). Result: predicted anthesis height 71.8 cm (sd 3.7), ruler at maturity 84.7 cm,
+difference 12.9 cm (sd 4.5); the model-free LiDAR canopy-top P95 is 10.2 cm (sd 4.6) higher at maturity than at anthesis.
+The canopy had therefore NOT reached its final height by the anthesis flight (ear and peduncle extension after anthesis),
+which is exactly why the maturity ruler must not be used as an anthesis label. A maturity model that uses VNIR features
+cannot be applied across the dates at all (green vs senesced canopy: red-edge indices differ by > 100 sd), so only
+LiDAR-structure models are transferred. AGT has no height measurements.
 
 ## Two-stream network: results of the overnight runs (9-10 Oct 2026)
 
@@ -57,8 +64,15 @@ bands** (the fixed list of 111 bands usable on >= 95 % of the plots of every ref
 | Biomass, Muresk maturity (128) | 0.07 / 1,388 | **0.13 / 1,340** | 0.14 / 1,332 | 0.13 / 1,342 | ~0 | 0.27 / 1,237 (Fused_bands_PCA LightGBM) |
 | Biomass, AGT anthesis (252) | 0.06 / 1,475 | **0.07 / 1,467** | 0.10 / 1,444 | 0.09 / 1,450 | ~0 | 0.19 / 1,374 (Fused_bands_PCA Ridge) |
 | Biomass, AGT maturity (252, LiDAR only) | 0.03 / 1,867 | **0.05 / 1,848** | 0.02 / 1,877 | 0.03 / 1,870 | ~0 | 0.06 / 1,847 (LiDAR_PCA Ridge) |
-| Height, Muresk anthesis (128) | 0.47 / 3.70 cm | 0.46 / 3.74 cm | 0.44 / 3.80 cm | 0.41 / 3.9 cm | ~0 | 0.59 / 3.26 cm (joint PCA Ridge) |
-| Height, Muresk maturity (128) | 0.35 / 4.11 cm | 0.35 / 4.10 cm | 0.37 / 4.03 cm | 0.41 / 3.9 cm | ~0 | 0.55 / 3.42 cm (joint PCA Ridge) |
+| Height, Muresk maturity (128), ungrouped folds, both flights pooled - superseded | 0.35 / 4.11 cm | 0.35 / 4.10 cm | 0.37 / 4.03 cm | 0.41 / 3.9 cm | ~0 | 0.55 / 3.42 cm (joint PCA Ridge) |
+| Height, Muresk maturity only, folds grouped by plot (rerun of 10 Oct) | - | see report section 5 | - | see report | - | 0.55 / 3.42 cm |
+
+Fold caveat: the 9-10 Oct runs stratified the folds by dataset but did not group them by physical plot; 246 of 256 height
+test samples and 708 of 760 biomass test samples had the same plot's other flight in the training set. For height (one
+ruler value per plot shared by both flights) this makes the scores optimistic; for biomass (different cuts, r 0.33 between
+stages) the effect is small. `dl_twostream.py` now groups folds by trial + Plot_ID by default (`--no-group-by-plot` restores
+the old split) and the reruns on the common band list (`--tag _grouped`, height with `--datasets muresk_maturity`) replace
+the two-stream scores in the report; the anthesis height rows are withdrawn (no anthesis ground truth).
 
 (R2 / RMSE in kg/ha or cm; the pooled "ALL" rows of the CSVs, R2 0.53-0.55 for biomass, are inflated by the between-dataset
 differences in mean biomass and are not comparable with the per-dataset values.)

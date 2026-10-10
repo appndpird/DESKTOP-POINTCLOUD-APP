@@ -1,6 +1,9 @@
 # Saved models of the 9-10 October 2026 rebuild
 
 ## height\ and biomass\ (feature models, scikit-learn, joblib)
+Height: maturity flight (2025-11-21) only, the only flight with a ruler measurement. The anthesis flight has no height ground
+truth; its height is predicted with the LiDAR-only maturity model (results_summary/height/anthesis_predicted_height.csv) and no
+anthesis height model is shipped.
 One file per feature family and flight / dataset: the best learner of that family by nested repeated 10-fold RMSE
 (`best_models.csv` and `summary_best_per_family.csv` give R2, RMSE, the learner and the input features of every file;
 `pca_components.csv` the components kept by the PCA families). Each file is a dict {model, features, pca_family, target,
