@@ -69,7 +69,8 @@ def build(variant, nds, device):
 
     class SpecStream(nn.Module):
         def __init__(self, nb=172, d=64):
-            super().__init__(); self.emb = nn.Sequential(nn.Linear(nb, d), nn.GELU(), nn.Linear(d, d))
+            # input per pixel = normalised log reflectance of every band (0 where unusable) + the availability mask
+            super().__init__(); self.emb = nn.Sequential(nn.Linear(2 * nb, d), nn.GELU(), nn.Linear(d, d))
             self.enc = nn.TransformerEncoder(nn.TransformerEncoderLayer(d, 4, 128, dropout=0.1, batch_first=True), 2); self.out = nn.Sequential(nn.Linear(d, 128), nn.ReLU(), nn.Dropout(0.2))
         def forward(self, spec): return self.out(self.enc(self.emb(spec)).mean(1))
 
@@ -87,7 +88,20 @@ def build(variant, nds, device):
     return TwoStream().to(device)
 
 
-def make_sample(z, train, rng, excl, maxpts=16000):
+def load_common_bands(weights_dir, wl):
+    """Fixed band list shipped with an ensemble (common_bands.csv: wavelength_nm, common_95) -> bool mask over the cube's
+    bands, or None when the ensemble was trained with the per-plot policy."""
+    p = os.path.join(weights_dir or "", "common_bands.csv")
+    if not os.path.exists(p):
+        return None
+    import pandas as pd
+    cb = pd.read_csv(p); cw = cb.wavelength_nm.to_numpy(float); cok = cb.common_95.to_numpy() == 1
+    return np.array([bool(cok[np.argmin(np.abs(cw - w))]) and abs(cw[np.argmin(np.abs(cw - w))] - w) < 0.5 for w in wl])
+
+
+def make_sample(z, train, rng, excl, maxpts=16000, common=None):
+    """common: bool mask of the fixed band list (identical for every plot); None = per-plot policy (band_mask in the
+    tensor file when present, clipped pixels and excluded ranges)."""
     import torch
     pts = z["points"].astype(np.float32); pix = z["pixels"].astype(np.float32)
     if train:
@@ -102,13 +116,20 @@ def make_sample(z, train, rng, excl, maxpts=16000):
     ch = np.clip(np.floor(np.clip(pts[:, 2], -0.1, None) / VOX + 5), 0, GRID[2] - 1)
     coords = np.stack([cx, cy, ch], 1).astype(np.int32)
     feats = np.stack([pts[:, 2], np.log1p(np.clip(pts[:, 3], 0, 20)), pts[:, 4] / 3.0, np.ones(len(pts), np.float32)], 1).astype(np.float32)
-    sp = np.log10(np.clip(pix / 10000.0, 1e-4, None)); valid = (pix > 0) & ~excl[None, :]
-    mu = (sp * valid).sum(1, keepdims=True) / np.maximum(valid.sum(1, keepdims=True), 1); sd = np.sqrt(((sp - mu) ** 2 * valid).sum(1, keepdims=True) / np.maximum(valid.sum(1, keepdims=True), 1)) + 1e-6
+    sp = np.log10(np.clip(pix / 10000.0, 1e-4, None))
+    if common is not None:
+        valid = (pix > 0) & common[None, :]
+    else:
+        bm = z["band_mask"].astype(bool) if "band_mask" in z.files else np.ones(pix.shape[1], bool)
+        valid = (pix > 0) & bm[None, :] & ~excl[None, :]
+    nv = np.maximum(valid.sum(1, keepdims=True), 1)
+    mu = (sp * valid).sum(1, keepdims=True) / nv; sd = np.sqrt(((sp - mu) ** 2 * valid).sum(1, keepdims=True) / nv) + 1e-6
     sp = np.where(valid, (sp - mu) / sd, 0).astype(np.float32)
+    sp = np.concatenate([sp, valid.astype(np.float32)], 1)          # values + availability mask -> 2 x bands per pixel
     return torch.from_numpy(coords), torch.from_numpy(feats), torch.from_numpy(sp)
 
 
-def batches(idx, data_dir, ds_id, train, rng, excl, bs=16, device=None, tcol=None):
+def batches(idx, data_dir, ds_id, train, rng, excl, bs=16, device=None, tcol=None, common=None):
     import torch
     order = rng.permutation(len(idx)) if train else np.arange(len(idx))
     for s in range(0, len(order), bs):
@@ -116,7 +137,7 @@ def batches(idx, data_dir, ds_id, train, rng, excl, bs=16, device=None, tcol=Non
         if train and len(rows) == 1: continue
         C, F, S, D, Y, I = [], [], [], [], [], []
         for k, (_, r) in enumerate(rows.iterrows()):
-            z = np.load(os.path.join(data_dir, r.file)); c, f, sp = make_sample(z, train, rng, excl)
+            z = np.load(os.path.join(data_dir, r.file)); c, f, sp = make_sample(z, train, rng, excl, common=common)
             C.append(torch.cat([torch.full((len(c), 1), k, dtype=torch.int32), c], 1)); F.append(f); S.append(sp); D.append(ds_id.get(r.dataset, 0)); Y.append(float(r[tcol]) if tcol and tcol in r and np.isfinite(r[tcol]) else np.nan); I.append(int(r.name))
         yield (torch.cat(C).to(device), torch.cat(F).to(device), torch.stack(S).to(device), torch.tensor(D).to(device), torch.tensor(Y, dtype=torch.float32), np.array(I))
 
@@ -129,6 +150,10 @@ def metrics(p, y):
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("mode", choices=["probe", "predict", "train"]); ap.add_argument("--data"); ap.add_argument("--weights"); ap.add_argument("--target", default="biomass")
     ap.add_argument("--out"); ap.add_argument("--device", default="auto"); ap.add_argument("--variant", default="two_stream"); ap.add_argument("--epochs", type=int, default=100); ap.add_argument("--folds", type=int, default=10)
+    ap.add_argument("--bands", default="common", choices=["common", "per_plot"],
+                    help="training only: 'common' = the fixed band list of common_bands.csv (next to this script's bundled weights, or --bands-csv), identical for every plot; "
+                         "'per_plot' = every band usable on the plot with the availability mask. Prediction follows the ensemble: common when its folder holds common_bands.csv.")
+    ap.add_argument("--bands-csv", default=None, help="CSV with wavelength_nm and common_95 columns (default: the bundled assets/dl_models/common_bands.csv)")
     a = ap.parse_args()
     if a.mode == "probe":
         print(json.dumps(probe())); return
@@ -146,22 +171,33 @@ def main():
         files = sorted([f for f in os.listdir(a.weights) if f.startswith(f"two_stream_{a.target}_fold") and f.endswith(".pt")]) if a.variant == "two_stream" else \
                 sorted([f for f in os.listdir(a.weights) if f.startswith(f"{a.variant}_{a.target}_fold") and f.endswith(".pt")])
         if not files: raise SystemExit(f"no weights for {a.variant}/{a.target} in {a.weights}")
-        # target normalisation of the pretrained models (fixed from the 2025 training set)
+        # target normalisation of the pretrained models (fixed from the training set: log kg/ha over 760 plots, cm over 256 plots)
         norm = {"biomass": (9.239603, 0.227668), "height": (84.656250, 5.091641)}[a.target]
+        common = load_common_bands(a.weights, wl)
+        print(f"[two_stream] band policy: {'common - ' + str(int(common.sum())) + ' fixed bands (common_bands.csv of the ensemble)' if common is not None else 'per plot (usable-band mask of each plot)'}", flush=True)
         ds_map = {d: i for i, d in enumerate(TRAIN_DSETS)}
-        # map a new dataset to the closest training embedding by stage keyword
-        ds_id = {d: ds_map.get(d, 2 if "anth" in str(d).lower() else 3) for d in idx.dataset.unique()}
+        # a dataset the ensemble was trained on uses its own trial/stage embedding; a NEW dataset is scored with every
+        # training embedding of the same stage (keyword 'anth' / 'mat' in its name, anthesis by default) and the
+        # predictions are averaged, so no single trial's offset is imposed on it
+        def cands(d, nds):
+            if d in ds_map and ds_map[d] < nds: return [ds_map[d]]
+            if nds == 2: return [1 if "mat" in str(d).lower() else 0]            # single-trial models: 0 = anthesis, 1 = maturity
+            mat = "mat" in str(d).lower() and "anth" not in str(d).lower()
+            return [i for i, n in enumerate(TRAIN_DSETS[:nds]) if ("maturity" in n) == mat] or list(range(nds))
         preds = np.zeros((len(files), len(idx)))
         for k, f in enumerate(files):
             sd = torch.load(os.path.join(a.weights, f), map_location="cpu"); nds = int(sd["ds_emb.weight"].shape[0])
-            if nds == 2:   # single-trial models: embedding 0 = anthesis, 1 = maturity
-                ds_id = {d: (1 if "mat" in str(d).lower() else 0) for d in idx.dataset.unique()}
             model = build(a.variant, nds, dev)
             model.load_state_dict({n: (t.float() if t.is_floating_point() else t) for n, t in sd.items()}); model.eval()
+            emb = {d: cands(d, nds) for d in idx.dataset.unique()}; nrep = max(len(v) for v in emb.values())
             with torch.no_grad():
-                for C, F, S, D, Y, I in batches(idx, a.data, ds_id, False, rng, excl, device=dev):
-                    p = model(C, F, S, D, len(I)).cpu().numpy() * norm[1] + norm[0]; preds[k, I] = np.exp(p) if ylog else p
+                for j in range(nrep):
+                    ds_id = {d: v[min(j, len(v) - 1)] for d, v in emb.items()}
+                    for C, F, S, D, Y, I in batches(idx, a.data, ds_id, False, rng, excl, device=dev, common=common):
+                        p = model(C, F, S, D, len(I)).cpu().numpy() * norm[1] + norm[0]; preds[k, I] += (np.exp(p) if ylog else p) / nrep
             print(f"[two_stream] fold model {k+1}/{len(files)} done", flush=True)
+        if any(len(v) > 1 for v in emb.values()):
+            print("[two_stream] new dataset(s) " + ", ".join(d for d, v in emb.items() if len(v) > 1) + ": predictions averaged over the training embeddings of the same stage; calibrate with a few measured plots (offset) for absolute values", flush=True)
         out = idx[["dataset", "Plot_ID"] + ([c for c in ("Plot", "Variety") if c in idx.columns])].copy()
         out[f"{tcol}_pred"] = preds.mean(0); out[f"{tcol}_pred_sd_folds"] = preds.std(0)
         if tcol in idx.columns and idx[tcol].notna().any():
@@ -172,12 +208,20 @@ def main():
     from sklearn.model_selection import KFold
     os.makedirs(a.out, exist_ok=True); idx = idx[idx[tcol].notna()].reset_index(drop=True); y_all = idx[tcol].to_numpy(float)
     yt = np.log(y_all) if ylog else y_all; ymu, ysd = float(yt.mean()), float(yt.std()); ds_id = {d: i for i, d in enumerate(sorted(idx.dataset.unique()))}
+    common = None
+    if a.bands == "common":
+        cbp = a.bands_csv or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "dl_models", "common_bands.csv")
+        common = load_common_bands(os.path.dirname(cbp), wl) if os.path.basename(cbp) == "common_bands.csv" else None
+        if common is None: print(f"[two_stream] common band list not found ({cbp}) - using the per-plot policy", flush=True)
+        else:
+            import shutil; shutil.copy2(cbp, os.path.join(a.out, "common_bands.csv"))       # travels with the trained models
+    print(f"[two_stream] band policy: {'common - ' + str(int(common.sum())) + ' fixed bands' if common is not None else 'per plot'}", flush=True)
     def train_one(rows, epochs):
         model = build(a.variant, max(len(ds_id), 1), dev); opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-3)
         steps = epochs * math.ceil(len(rows) / 16); sched = torch.optim.lr_scheduler.OneCycleLR(opt, 1e-3, total_steps=steps)
         for ep in range(epochs):
             model.train()
-            for C, F, S, D, Y, I in batches(rows, a.data, ds_id, True, rng, excl, device=dev, tcol=tcol):
+            for C, F, S, D, Y, I in batches(rows, a.data, ds_id, True, rng, excl, device=dev, tcol=tcol, common=common):
                 yn = ((torch.log(Y) if ylog else Y) - ymu) / ysd; loss = Fn.smooth_l1_loss(model(C, F, S, D, len(I)), yn.to(dev), beta=0.5)
                 opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(model.parameters(), 2.0); opt.step(); sched.step()
         return model
@@ -185,14 +229,15 @@ def main():
     for fold, (tr, te) in enumerate(KFold(folds, shuffle=True, random_state=0).split(idx)):
         t = time.time(); model = train_one(idx.iloc[tr], a.epochs); model.eval()
         with torch.no_grad():
-            for C, F, S, D, Y, I in batches(idx.iloc[te], a.data, ds_id, False, rng, excl, device=dev):
+            for C, F, S, D, Y, I in batches(idx.iloc[te], a.data, ds_id, False, rng, excl, device=dev, common=common):
                 p = model(C, F, S, D, len(I)).cpu().numpy() * ysd + ymu; pred[I] = np.exp(p) if ylog else p
         torch.save(model.state_dict(), os.path.join(a.out, f"{a.variant}_{a.target}_fold{fold}.pt"))
         print(f"[two_stream] fold {fold+1}/{folds}: {json.dumps({k_: round(v, 3) for k_, v in metrics(pred[te], y_all[te]).items()})} ({time.time()-t:.0f}s)", flush=True)
     m = metrics(pred, y_all); print("[two_stream] CV:", json.dumps({k_: round(v, 3) for k_, v in m.items()}), flush=True)
     out = idx[["dataset", "Plot_ID"] + [c for c in ("Plot", "Variety") if c in idx.columns]].copy(); out[f"{tcol}_measured"] = y_all; out[f"{tcol}_predcv"] = pred
     out.to_csv(os.path.join(a.out, f"{a.variant}_{a.target}_cv_predictions.csv"), index=False)
-    json.dump({"variant": a.variant, "target": a.target, "folds": folds, "epochs": a.epochs, "device": str(dev), "cv": m, "norm": [ymu, ysd], "datasets": list(ds_id)}, open(os.path.join(a.out, f"{a.variant}_{a.target}_cv.json"), "w"), indent=1)
+    json.dump({"variant": a.variant, "target": a.target, "folds": folds, "epochs": a.epochs, "device": str(dev), "cv": m, "norm": [ymu, ysd], "datasets": list(ds_id),
+               "band_policy": a.bands if common is not None else "per_plot", "n_bands": int(common.sum()) if common is not None else None}, open(os.path.join(a.out, f"{a.variant}_{a.target}_cv.json"), "w"), indent=1)
     print(f"[two_stream] outputs -> {a.out}", flush=True)
 
 

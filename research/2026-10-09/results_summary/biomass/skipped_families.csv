@@ -1,0 +1,9 @@
+dataset,feature_set,reason
+agt_maturity,VNIR_core,0 plots with usable VNIR / 0 VNIR features
+agt_maturity,Fused_core,0 plots with usable VNIR / 0 VNIR features
+agt_maturity,Fused_all,0 plots with usable VNIR / 3 VNIR features
+agt_maturity,VNIR_PCA,"0 plots, 0 LiDAR / 0 VNIR features"
+agt_maturity,Fused_PCA,"0 plots, 0 LiDAR / 0 VNIR features"
+agt_maturity,Fused_PCA_joint,"0 plots, 0 LiDAR / 0 VNIR features"
+agt_maturity,VNIR_bands_PCA,"0 plots, 0 LiDAR / 0 VNIR features"
+agt_maturity,Fused_bands_PCA,"0 plots, 0 LiDAR / 0 VNIR features"

@@ -1,0 +1,6 @@
+trial,flight,stage,plots,gt_plots,lidar_qc_ok,vnir_reflectance_ok,vnir_qc_ok,red_ok,gt_valid_lidar,gt_valid_vnir,gt_valid_fused,usable_band_cells_pct,las,cube,grid
+muresk,2025-09-30,anthesis,128,128,128,1,128,128,128,128,128,84.1,20250930_NUE_I_DPIRD_Muresk_F_Gobi_LiDAR_CombinedPointCloud.las,20250930_NUE_I_DPIRD_Muresk_F_Gobi_VNIR_Orthomosaic.bin,aligned_grid_refit_20250930.shp
+muresk,2025-11-21,maturity,128,128,128,1,126,128,128,126,126,89.0,20251121_NUE_I_DPIRD_Muresk_F_Gobi_noextent_LiDAR_CombinedPointCloud.las,20251121_NUE_I_DPIRD_Muresk_F_Gobi_noextent_VNIR_Orthomosaic.bin,aligned_grid_refit.shp
+agt,2025-09-22,anthesis,816,252,814,1,814,337,252,113,113,70.0,20250922_AGT_NUE_Bejoording_Bejoording_Gobi_LiDAR_CombinedPointCloud.las,20250922_AGT_NUE_Bejoording_Bejoording_Gobi_VNIR_Orthomosaic.bin,refit_auto3.shp
+agt,2025-11-13_f1,maturity,816,252,816,0,0,728,252,0,0,0.0,20251113_AGT_NUE_Bejoording_Bejoording_Gobi_flight1_LiDAR_CombinedPointCloud.las,20251113_AGT_NUE_Bejoording_Bejoording_Gobi_flight1_VNIR_Orthomosaic.bin,aligned_grid_refit_flight1.shp
+agt,2025-11-13_f2,maturity,816,252,501,0,0,221,163,0,0,0.0,20251113_AGT_NUE_Bejoording_Bejoording_Gobi_flight2_LiDAR_CombinedPointCloud.las,20251113_AGT_NUE_Bejoording_Bejoording_Gobi_flight2_VNIR_Orthomosaic.bin,aligned_grid_refit_flight2.shp

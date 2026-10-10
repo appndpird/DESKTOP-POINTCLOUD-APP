@@ -598,9 +598,17 @@ against 0.35 for the fused ridge, and height 3.9 cm against 3.6 cm.
 
 ### Using the pretrained deep models, step by step
 
-The bundled ensemble lives in `phenoapp/assets/dl_models/` (`two_stream_<target>_fold<k>.pt`, five fold models per
-target, biomass in kg/ha dry and height in cm). A prediction is the mean of the fold models; the spread between them is
-written next to it as an uncertainty.
+The bundled ensembles live in `phenoapp/assets/dl_models/`: `two_stream_<target>_fold0-4.pt` (LiDAR + VNIR) and
+`lidar_only_<target>_fold0-4.pt` for biomass (kg/ha dry) and height (cm), five fold models each, trained for 100 epochs
+per fold on 760 wheat plots (biomass) and 256 plots (height) of two trials at anthesis and maturity, with the common band
+policy: `common_bands.csv` next to the weights lists the 111 bands used for every plot (522-645, 691-754, 772-926 and
+965-1000 nm), and the runner applies it automatically. A prediction is the mean of the fold models; the spread between
+them is written next to it as an uncertainty. Use `lidar_only` for a flight without a usable reflectance cube. Held-out
+scores of these ensembles (10-fold, per dataset): biomass R² 0.27 / RMSE 1,636 kg/ha at anthesis and 0.13 / 1,340 at
+maturity on the trial with ruler heights, 0.07 / 1,467 and 0.05 / 1,848 on the second trial; height 3.7 cm at anthesis,
+4.1 cm at maturity. The LiDAR-only ensemble scores the same within the noise, and the VNIR-only variant carries no
+within-trial signal at this sample size, so the spectral stream is kept for its small gain at anthesis, not as a model
+on its own.
 
 1. **Environment.** The network needs torch and spconv, which are not in PhenoApp's own environment. Create one once
    (conda or venv; Python 3.11, torch 2.6 with CUDA 12.4, `spconv-cu124`) and tick nothing else. On an older GPU without
@@ -623,19 +631,25 @@ written next to it as an uncertainty.
    `<metrics>_dl_<target>_<variant>_pretrained_predictions.csv` with one row per plot: the prediction, the fold spread,
    the measured value when given, and the metrics (R2, RMSE, rRMSE, MAE, bias, r, accuracy) printed in the log.
 5. **Read the result with the right expectation.** The ensemble was trained on wheat plots of two trials at anthesis and
-   maturity. On a new trial it transfers the structure-to-biomass relation but not the trial's own offset: compare the
-   predictions with a few measured plots and apply an offset, or treat the output as a ranking. Within a trial with its own
-   ground truth, the feature models of the Height Models and Biomass ML tabs were as good or better in every test so far.
+   maturity, and each training trial has its own embedding in the network. A dataset it was not trained on is scored with
+   every training embedding of its stage and the predictions are averaged, so no single trial's offset is imposed, but
+   the trial's own offset is still unknown: compare the predictions with a few measured plots and apply an offset, or
+   treat the output as a ranking. Within a trial with its own ground truth, the feature models of the Height Models and
+   Biomass ML tabs were better in every test so far (biomass R² 0.37 against 0.27 for the network at anthesis; height
+   3.3 cm against 3.7 cm).
 6. **Train or cross-validate on your own plots.** With a ground-truth CSV, "Train / cross-validate on this trial" runs
    k-fold cross-validation (default 10 folds, 100 epochs per fold, training-time augmentation: random 180-degree
    rotation, mirror across the row axis, 0-30 % point dropout, 1 cm jitter, pixel bootstrap and a 0.9-1.1 brightness
    factor) and then fits a model on all plots. Outputs in `<metrics>_dl_<target>_training/`: fold weights, held-out
    predictions per plot and a JSON summary. Several hundred labelled plots per crop are needed before the network beats
    the feature models; with 100-250 plots use it as a check, not as the reporting model.
-7. **Band policy.** The bundled models and the tab use every band that is usable on a plot (the NaN rule) and tell the
-   network which bands were absent. For cross-trial work with flights that lost bands to clipping, train and predict on
-   a fixed common band list instead (the research script offers `--bands common`; the list of bands usable on every
-   flight is written by the dataset build as `vnir_common_bands.csv`).
+7. **Band policy.** The bundled models use the fixed common band list (111 bands, `common_bands.csv` next to the
+   weights), which is also the default when you train from the tab, so every flight is represented by the same bands
+   and the network cannot read band availability as a fingerprint of the trial. The alternative, `per_plot`, uses every
+   band usable on a plot (the NaN rule written as `band_mask` in the tensor files) and tells the network which bands
+   were absent; it keeps the most data per plot but was not better in the comparison (biomass R² 0.23 against 0.27 with
+   the common list at anthesis, 0.07 against 0.13 at maturity; height equal). A model trained with one policy must be
+   applied with the same policy; the runner reads the policy from the weights folder.
 
 ### Features used by each model
 

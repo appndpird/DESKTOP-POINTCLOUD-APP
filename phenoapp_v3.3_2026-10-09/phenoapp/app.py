@@ -44,7 +44,7 @@ from phenoapp.ui.about_tab          import AboutTab, _resource_path
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"PhenoApp v{__version__} (2026-10-09) — Plant Phenotyping from Point Clouds "
+        self.setWindowTitle(f"PhenoApp v{__version__} (2026-10-10) — Plant Phenotyping from Point Clouds "
                             "(LiDAR v3.2 + VNIR v3.0.1 QC, biomass and height models)")
         self.resize(1500, 950)
 

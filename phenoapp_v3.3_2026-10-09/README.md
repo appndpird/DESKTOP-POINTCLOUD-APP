@@ -1,5 +1,20 @@
 # Plant Phenotyping from Point Clouds
 
+**v3.3.2 (2026-10-10) - new two-stream ensembles, common band policy.** `phenoapp/assets/dl_models/` now holds the
+ensembles of the 9-10 October rebuild: `two_stream_<target>_fold0-4.pt` and `lidar_only_<target>_fold0-4.pt` for biomass
+and height (float16, 100 epochs per fold, training-time augmentation), trained with the **common band policy**: the 111
+bands usable on >= 95 % of the plots of every reflectance flight (`common_bands.csv` next to the weights) are the
+spectral input of every plot, so no flight is represented by a different band set. The runner (`phenoapp/dl/two_stream.py`)
+applies the band list automatically when it is present next to the weights, takes the per-plot usable-band mask from the
+tensor files otherwise (`core.deep_models.prepare_plot_tensors` now writes `band_mask`), feeds values + availability mask
+to the spectral stream (`2 x bands` inputs), and scores a dataset it was not trained on with every training embedding of
+the same stage, averaged. Training from the tab defaults to the common policy (`--bands common|per_plot`). Held-out
+10-fold scores of the full ensembles (research/2026-10-09/results_summary): biomass two-stream R2 0.27 / RMSE 1,636 kg/ha
+at anthesis and 0.13 / 1,340 at maturity on the trial with ruler heights, 0.07 / 1,467 and 0.05 / 1,848 on the second
+trial; height 3.7 cm (anthesis) and 4.1 cm (maturity). The feature models of the Height Models and Biomass ML tabs remain
+better within a trial (biomass 0.37 / 1,513; height 3.3 cm). The previous v3.1 weights are kept in
+`phenoapp/assets/dl_models_v3.1_superseded/` (not bundled).
+
 **v3.3.1 (2026-10-09) - PCA feature families** (`phenoapp/core/pca_families.py`): the Biomass ML tab gains `LiDAR_PCA`,
 `VNIR_PCA`, `Fused_PCA` (one PCA per modality, late fusion), `Fused_PCA_joint` (one PCA on both, early fusion),
 `VNIR_bands_PCA` and `Fused_bands_PCA` (PCA on the mean vegetation spectrum over the bands usable on >= 95 % of the plots,

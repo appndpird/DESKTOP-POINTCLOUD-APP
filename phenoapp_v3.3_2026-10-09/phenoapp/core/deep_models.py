@@ -149,10 +149,13 @@ def prepare_plot_tensors(mgr, cube, plots, out_dir, dataset_name, stage, gt=None
         kk = rng.choice(pool, NPIX, replace=len(pool) < NPIX); pix = S[px_idx][kk]
         vspec = spec[veg] if veg.sum() > 10 else spec
         mean_spec = np.where((vspec > 0).sum(0) > 0, np.nansum(np.where(vspec > 0, vspec, np.nan), 0) / np.maximum((vspec > 0).sum(0), 1), 0).astype(np.float32)
+        # per-plot usable-band mask (NaN rule: valid on >= half of the plot's pixels, cube is reflectance); the network
+        # zeroes the other bands and receives the mask, or uses the ensemble's fixed common band list instead
+        band_mask = (((spec > 0).mean(0) >= 0.5) & refl_ok).astype(np.uint8)
         bio = float(gtm.loc[pid, "biomass_kg_ha"]) if (gtm is not None and pid in gtm.index and "biomass_kg_ha" in gtm.columns) else np.nan
         hgt = float(gtm.loc[pid, "height_cm"]) if (gtm is not None and pid in gtm.index and "height_cm" in gtm.columns) else np.nan
         np.savez_compressed(os.path.join(out_dir, dataset_name, f"plot_{pid}.npz"), points=pts, pixels=pix, mean_spec=mean_spec, wavelengths=wl.astype(np.float32),
-                            biomass_kg_ha=bio, height_cm=hgt, fcover_vnir=float(veg.mean()))
+                            band_mask=band_mask, biomass_kg_ha=bio, height_cm=hgt, fcover_vnir=float(veg.mean()), vnir_reflectance_ok=int(refl_ok), n_usable_bands=int(band_mask.sum()))
         rows.append(dict(dataset=dataset_name, stage=stage, Plot_ID=pid, Plot=r.get("Plot", pid), Variety=r.get("Variety", ""), biomass_kg_ha=bio, height_cm=hgt, n_points=len(pts),
                          n_pixels_region=len(px_idx), fcover_vnir=float(veg.mean()), vnir_reflectance_ok=int(refl_ok), file=f"{dataset_name}/plot_{pid}.npz"))
         if progress_cb and (i % 8 == 0 or i == n - 1): progress_cb(30 + int(70 * (i + 1) / n), f"tensors: plot {i + 1}/{n}")
