@@ -35,6 +35,46 @@ Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10
   Per-plot VNIR files for the two AGT flight-2 plots 1001 / 1024 still lack 4 / 1 edge pixels (writer defect fixed in
   v3.0.1; regenerate on a machine with GDAL).
 
+## Final results (12 Oct 2026) - numbers to quote
+
+**Reporting models = top three per category, nested selection** (`nested_top3.py`; outer 10-fold, inner 5-fold; the three
+best family x learner combinations of each category are chosen inside every training fold and averaged). R2 / RMSE:
+
+| Target, dataset | LiDAR only | VNIR only | Fused |
+|---|---|---|---|
+| Biomass, Muresk anthesis (128) | 0.34 / 1,553 kg/ha | 0.25 / 1,656 | **0.37 / 1,516** |
+| Biomass, Muresk maturity (126) | 0.18 / 1,311 | 0.09 / 1,378 | **0.21 / 1,283** |
+| Biomass, AGT anthesis (252) | 0.13 / 1,418 | 0.05 / 1,485 | **0.17 / 1,385** |
+| Biomass, AGT maturity (252) | **0.05 / 1,849** | (radiance cubes) | - |
+| Height, Muresk maturity flight (128) | 0.40 / 4.0 cm | 0.17 / 4.6 cm | **0.53 / 3.5 cm** |
+
+Saved ensembles: `height\models` and `biomass\models`, `<target>_<dataset>_<category>_top3_ensemble.joblib` (apply in the
+PhenoApp Height Models / Biomass ML tabs, v3.3.3). Bootstrap SE of the best single model's RMSE: 65-120 kg/ha (biomass),
+0.2 cm (height) - larger than the differences between the top few models, hence the ensembles.
+
+**Two-stream network, folds grouped by plot, common 111 bands** (supersedes the ungrouped runs below):
+
+| Dataset | Two-stream | LiDAR only |
+|---|---|---|
+| Biomass, Muresk anthesis | 0.24 / 1,659 | 0.26 / 1,638 |
+| Biomass, Muresk maturity | 0.12 / 1,348 | 0.11 / 1,360 |
+| Biomass, AGT anthesis | 0.05 / 1,484 | 0.05 / 1,483 |
+| Biomass, AGT maturity | 0.03 / 1,871 | 0.01 / 1,887 |
+| Height, maturity flight only | 0.37 / 4.0 cm | 0.43 / 3.8 cm |
+
+These ensembles (folds 0-4) are bundled in PhenoApp v3.3.3; all 10 folds are in the release asset
+`PhenoApp_v3.3.3_twostream_weights.zip`.
+
+**Muresk only, both flights pooled (128 + 128 plot-flights), stage flag, folds grouped by plot** - the models saved for
+later fine-tuning on data where every band is valid. Feature models (`biomass_muresk_fullspectrum.py`, best per family,
+`biomass\models\biomass_muresk_fullspectrum_*` = 138 bands 469-754, 772-926, 965-1000 nm; `biomass_muresk_validbands_*` =
+142 bands incl. the oxygen-A bands recomputed from the plot cubes, `vnir_spectra_o2a.csv`): fused PCA joint GPR R2 0.32 /
+1,399 kg/ha over all 256 (0.37 anthesis, 0.22 maturity); LiDAR PCA 0.27; VNIR PCA 0.20; the oxygen-A bands change the
+band families by a few kg/ha only. Network (all three variants, 10 folds each, in the weights zip): two-stream 0.27 /
+0.07 (anthesis / maturity, 138 bands) and 0.24 / 0.07 (142 bands), LiDAR-only 0.19 / 0.14 and 0.22 / 0.07, VNIR-only 0.
+The blue bands (417-466 nm) are clipped on the anthesis flight (no plot has all of them valid) and cannot enter a model
+that pools both flights.
+
 ## Height ground truth: maturity flight only (rule adopted 10 Oct 2026)
 Muresk has a single ruler height per plot, measured at maturity (2025-11-21). Error metrics (R2, RMSE, ...) for height are
 therefore reported for the maturity flight only. The anthesis flight (2025-09-30) has no height measurement: its

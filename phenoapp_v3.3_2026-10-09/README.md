@@ -1,5 +1,17 @@
 # Plant Phenotyping from Point Clouds
 
+**v3.3.3 (2026-10-12) - top-three ensembles, grouped-fold network, height on the measured flight only.**
+`phenoapp/core/ensembles.py`: the "Apply a saved model" panels of the Height Models and Biomass ML tabs accept mean
+ensembles (`{"type": "mean_ensemble", "members": [...]}`) as written by the research pipeline's nested top-three
+selection (three best family x learner combinations per category - LiDAR only, VNIR only, fused - chosen inside a nested
+cross-validation); `apply_model` / `apply_height_model` take the spectra table (and for height the VNIR v3 table) so models
+with spectral-band inputs can be applied. Fixed: the Biomass ML apply panel unpacked the VNIR loader incorrectly. The
+bundled two-stream ensembles were retrained with folds grouped by plot (both flights of a plot always in the same fold);
+the height ensemble uses only the flight with a ruler measurement (maturity). Height error metrics everywhere refer to
+that flight; a flight without a measurement of its own gets a predicted height, not an error score. Grouped held-out
+scores: biomass two-stream R2 0.24 / 0.12 (Muresk anthesis / maturity), 0.05 / 0.03 (AGT); height two-stream 4.0 cm,
+LiDAR-only 3.8 cm. The 3.3.2 weights are kept in `_dl_models_v3.3.2_superseded/` (not bundled).
+
 **v3.3.2 (2026-10-10) - new two-stream ensembles, common band policy.** `phenoapp/assets/dl_models/` now holds the
 ensembles of the 9-10 October rebuild: `two_stream_<target>_fold0-4.pt` and `lidar_only_<target>_fold0-4.pt` for biomass
 and height (float16, 100 epochs per fold, training-time augmentation), trained with the **common band policy**: the 111

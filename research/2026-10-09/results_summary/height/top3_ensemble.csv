@@ -1,0 +1,5 @@
+dataset,rank,feature_set,learner,R2,RMSE,rmse_bootstrap_se_top
+2025-11-21,1,LiDAR+VNIR_PCA_joint,Ridge,0.549,3.4,
+2025-11-21,2,LiDAR+VNIR_PCA,Ridge,0.541,3.4,
+2025-11-21,3,LiDAR+VNIR,GPR,0.506,3.6,
+2025-11-21,ensemble,mean of top 3,,0.549,3.4,0.2

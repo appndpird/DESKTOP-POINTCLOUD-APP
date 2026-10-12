@@ -135,6 +135,11 @@ dlg = os.path.join(DL, "results", "dl_biomass_commonbands_grouped_comparison.csv
 if os.path.exists(dlg): DLG = pd.read_csv(dlg)[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
 dlhg = os.path.join(DL, "results", "dl_height_commonbands_grouped_maturity_comparison.csv")
 if os.path.exists(dlhg): DLHG = pd.read_csv(dlhg)[["variant", "dataset", "n", "R2", "RMSE", "MAE", "r", "accuracy"]]
+DLMF = DLMA = None   # Muresk only: the 138 recommended bands (fixed list, dataset\vnir_muresk_bands.csv) / every usable band per plot incl. the excluded ranges; grouped folds
+dlmf = os.path.join(DL, "results", "dl_biomass_commonbands_muresk_fullbands_comparison.csv")
+if os.path.exists(dlmf): DLMF = pd.read_csv(dlmf)[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
+dlma = os.path.join(DL, "results", "dl_biomass_commonbands_muresk_validbands_comparison.csv")
+if os.path.exists(dlma): DLMA = pd.read_csv(dlma)[["variant", "dataset", "n", "R2", "RMSE", "rRMSE", "MAE", "r", "accuracy"]]
 ncb = None
 cbp = os.path.join(M, "dataset", "vnir_common_bands.csv")
 if os.path.exists(cbp): ncb = int(pd.read_csv(cbp).common_95.sum())
@@ -186,8 +191,34 @@ if Bt is not None:
              "".join(img(f"b_{ds}") for ds in DSETS), "<h3>Top features (random-forest importance on all features, per dataset)</h3>", img("b_imp"),
              "<h3>Pooled model across trials and stages (grouped 10-fold), R² per dataset</h3>", table_html(pooled.reset_index()),
              "<h3>Cross-trial transfer (train one trial, test the other, same stage)</h3>", table_html(cross)]
+    # Muresk-only, both flights pooled with a stage flag, folds grouped by plot (biomass_muresk_fullspectrum.py): recommended bands and all bands
+    for run, title, note in (("muresk_fullspectrum", "both flights, all 128 + 128 ground-truth plots, every valid band: 138 bands (469-754, 772-926, 965-1000 nm) - the first bands, the water-vapour tail and the oxygen-A bands are not carried by the spectra tables, and the blue is clipped on the anthesis flight", "biomass\\models\\biomass_muresk_fullspectrum_*.joblib"),):
+        mfs = os.path.join(BM, run, "best_models.csv")
+        if not os.path.exists(mfs): html += [f"<h3>Muresk only, {title}</h3><p>in progress</p>"]; continue
+        MF = pd.read_csv(mfs); MFc = pd.read_csv(os.path.join(BM, run, "model_comparison.csv")); MFs = json.load(open(os.path.join(BM, run, "settings.json")))
+        per = MFc[MFc.dataset != "muresk_both"].merge(MF[["family", "learner"]].rename(columns={"family": "feature_set"}), on=["feature_set", "learner"]).pivot_table(index="feature_set", columns="dataset", values=["R2", "RMSE"]).round(2)
+        html += [f"<h3>Muresk only, {title} (both flights pooled, stage flag, folds grouped by plot, 3 x 10-fold)</h3>",
+                 f"<p>Inputs: {MFs['lidar_features']} LiDAR features, {MFs['vnir_index_features']} VNIR index features and the mean vegetation spectrum over {MFs['bands_used']} bands (log10, SNV). "
+                 f"The best model of each family is saved for later fine-tuning on data where every band is valid ({note}); the per-dataset models of section 4 are kept unchanged. Scores are on the pooled 256 plot-flights (R² partly reflects the anthesis-maturity difference in mean biomass) and per flight within the same folds.</p>",
+                 table_html(MF[["family", "learner", "R2", "RMSE", "rRMSE", "r", "features"]].round(3)), "<h4>Per flight, best learner of each family</h4>", table_html(per.reset_index())]
 else:
     html += ["<h2>4. Above-ground biomass</h2><p>not run</p>"]
+# ------------------------------------------------------------ reporting models: top three per category, nested selection
+NT = []
+for t in ("height", "biomass"):
+    p_ = os.path.join(M, t, "results", "nested_top3_summary.csv")
+    if os.path.exists(p_): NT.append(pd.read_csv(p_))
+if NT:
+    NT = pd.concat(NT, ignore_index=True)
+    piv = NT.assign(cell=NT.R2.round(2).astype(str) + " / " + NT.RMSE.round(1).astype(str)).pivot_table(index=["target", "dataset"], columns="category", values="cell", aggfunc="first").reindex(columns=["lidar", "vnir", "fused"]).fillna("-")
+    html += ["<h2>4b. Reporting models: top three per category (LiDAR only, VNIR only, fused), nested selection</h2>",
+             "<div class='note'><b>How these numbers are made.</b> Outer 10-fold cross-validation; inside each outer training set a 5-fold inner loop scores every feature family x learner, "
+             "and the three best combinations of each category are fitted on the outer training plots and averaged on the outer test plots. The choice of the three never sees the plots it is scored on, "
+             "so these are the honest scores of the procedure 'take the top three of the category and average them', to be quoted in reports. The same selection on all plots gives the saved ensembles "
+             "(height\\models and biomass\\models, <code>&lt;target&gt;_&lt;dataset&gt;_&lt;category&gt;_top3_ensemble.joblib</code>), which the Height Models and Biomass ML tabs apply directly. "
+             "Height: maturity flight only (ruler at maturity). AGT maturity: LiDAR only (radiance cubes).</div>",
+             "<h3>R² / RMSE (kg/ha for biomass, cm for height)</h3>", table_html(piv.reset_index()),
+             "<h3>Members of the saved ensembles</h3>", table_html(NT[["target", "dataset", "category", "n", "R2", "RMSE", "final_members", "model_file"]].round(3))]
 html += ["<h2>5. Two-stream deep network (sparse 3D CNN on the classified plot cloud + spectral transformer on VNIR pixels, late fusion)</h2>",
          "<p>Inputs from the same dataset; the spectral stream never sees an unusable band (per-plot band mask from the NaN rule, clipped pixels and excluded ranges are masked and the availability mask is given to the network). 10-fold CV stratified by dataset, 100 epochs per fold (AdamW, OneCycle schedule, log-biomass target). "
          "Training-time data augmentation, applied on the fly to every training plot: point cloud randomly rotated by 180° and mirrored across the row axis, 0-30 % of the points dropped at random, 1 cm xy jitter; spectral pixels bootstrap-resampled within the plot and scaled by a random brightness factor of 0.9-1.1. "
@@ -197,6 +228,8 @@ html += ["<h2>5. Two-stream deep network (sparse 3D CNN on the classified plot c
          "For height both flights share one ruler value per plot, so those height scores are optimistic and are superseded by the grouped rerun on the maturity flight below; for biomass the two stages have different cuts (r = 0.33 between a plot's anthesis and maturity biomass), so the effect is small, and the grouped rerun below replaces them where available.</div>",
          (("<h3>Grouped-fold reruns (both flights of a plot in the same fold; common bands): the valid two-stream scores</h3>" + table_html(DLG)) if DLG is not None else "<p>Grouped-fold biomass rerun: in progress.</p>"),
          (("<h4>Height, maturity flight only, grouped folds, common bands</h4>" + table_html(DLHG)) if DLHG is not None else "<p>Grouped-fold height rerun (maturity flight only): in progress.</p>"),
+         (("<h4>Muresk only, the 138 recommended Muresk bands (469-754, 772-926, 965-1000 nm; fixed list), both flights, grouped folds: the full-spectrum network saved for later fine-tuning</h4>" + table_html(DLMF)) if DLMF is not None else "<p>Muresk recommended-band two-stream run: in progress.</p>"),
+         (("<h4>Muresk, 128 + 128 plots, the 142 valid bands (only 0-415 and 928-962 nm excluded; 469-926, 965-1000 nm), grouped folds</h4>" + table_html(DLMA)) if DLMA is not None else "<p>Muresk valid-bands two-stream run (142 bands): queued after the recommended-band run.</p>"),
          ("<h3>Same network for height (Muresk, maturity flight; per-plot bands, ungrouped folds - superseded)</h3>" + table_html(DLH)) if DLH is not None else "",
          (f"<h3>Common-band run: the same network with one fixed band list for every flight</h3><p>Band policy 'common': the {ncb} bands usable on at least 95 % of the ground-truth plots of every reflectance flight "
           "(522-645, 691-754, 772-926, 965-1000 nm; dataset\\vnir_common_bands.csv) are the spectral input of every plot, so no flight is represented by a different band set and the network cannot use band availability as a trial fingerprint. "

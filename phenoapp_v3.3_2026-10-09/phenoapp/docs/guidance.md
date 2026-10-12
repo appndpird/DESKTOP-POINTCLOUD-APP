@@ -599,22 +599,22 @@ written to <metrics>_dl_<target>_<variant>_pretrained_predictions.csv, with metr
 given) or trains and cross-validates the network on the current trial (fold weights, CV predictions and a
 JSON summary in <metrics>_dl_<target>_training). Expect the feature models to be as good or better until
 several hundred labelled plots per crop are available: on the validation trial the feature models stayed ahead of the
-network for biomass (R2 0.37 against 0.27 at anthesis) and for height on the maturity flight (3.4 cm against 4.1 cm).
+network for biomass (R2 0.37 against 0.24 at anthesis) and for height on the maturity flight (3.5 cm against 3.8 cm).
 
 ### Using the pretrained deep models, step by step
 
 The bundled ensembles live in `phenoapp/assets/dl_models/`: `two_stream_<target>_fold0-4.pt` (LiDAR + VNIR) and
 `lidar_only_<target>_fold0-4.pt` for biomass (kg/ha dry) and height (cm), five fold models each, trained for 100 epochs
-per fold on 760 wheat plots (biomass) and 256 plots (height) of two trials at anthesis and maturity, with the common band
+per fold with folds grouped by plot (both flights of a plot always in the same fold): biomass on 760 wheat plots of two
+trials at anthesis and maturity, height on the 128 plots of the flight that has a ruler measurement (maturity). Band
 policy: `common_bands.csv` next to the weights lists the 111 bands used for every plot (522-645, 691-754, 772-926 and
 965-1000 nm), and the runner applies it automatically. A prediction is the mean of the fold models; the spread between
 them is written next to it as an uncertainty. Use `lidar_only` for a flight without a usable reflectance cube. Held-out
-scores of these ensembles (10-fold, per dataset): biomass R² 0.27 / RMSE 1,636 kg/ha at anthesis and 0.13 / 1,340 at
-maturity on the trial with ruler heights, 0.07 / 1,467 and 0.05 / 1,848 on the second trial; height 4.1 cm on the
-maturity flight (the only flight with a ruler measurement; a rerun with folds grouped by plot is reported in the research
-README). The LiDAR-only ensemble scores the same within the noise, and the VNIR-only variant carries no
-within-trial signal at this sample size, so the spectral stream is kept for its small gain at anthesis, not as a model
-on its own.
+scores (grouped 10-fold, per dataset): biomass two-stream R² 0.24 / RMSE 1,659 kg/ha at anthesis and 0.12 / 1,348 at
+maturity on the trial with ruler heights, 0.05 / 1,484 and 0.03 / 1,871 on the second trial (LiDAR-only 0.26, 0.11,
+0.05, 0.01); height on the maturity flight two-stream R² 0.37 / 4.0 cm, LiDAR-only 0.43 / 3.8 cm. The VNIR-only
+variant carries no within-trial signal at this sample size. For reporting and routine prediction prefer the feature
+models' top-three ensembles (Height Models / Biomass ML tabs), which scored higher everywhere.
 
 1. **Environment.** The network needs torch and spconv, which are not in PhenoApp's own environment. Create one once
    (conda or venv; Python 3.11, torch 2.6 with CUDA 12.4, `spconv-cu124`) and tick nothing else. On an older GPU without
@@ -641,8 +641,8 @@ on its own.
    every training embedding of its stage and the predictions are averaged, so no single trial's offset is imposed, but
    the trial's own offset is still unknown: compare the predictions with a few measured plots and apply an offset, or
    treat the output as a ranking. Within a trial with its own ground truth, the feature models of the Height Models and
-   Biomass ML tabs were better in every test so far (biomass R² 0.37 against 0.27 for the network at anthesis; height
-   3.4 cm against 4.1 cm on the maturity flight).
+   Biomass ML tabs were better in every test so far (biomass R² 0.37 against 0.24 for the network at anthesis; height
+   3.5 cm against 3.8 cm on the maturity flight).
 6. **Train or cross-validate on your own plots.** With a ground-truth CSV, "Train / cross-validate on this trial" runs
    k-fold cross-validation (default 10 folds, 100 epochs per fold, training-time augmentation: random 180-degree
    rotation, mirror across the row axis, 0-30 % point dropout, 1 cm jitter, pixel bootstrap and a 0.9-1.1 brightness
@@ -714,6 +714,16 @@ on held-out plots or on another flight, and predict plots that have no ground tr
 **Biomass or any per-plot trait, Biomass ML tab (tab 9).** Inputs: metrics CSV, VNIR v3 CSV, ground-truth CSV, the spectra CSV is found automatically; set the target column. Families: start with LiDAR core, fused core, LiDAR PCA and fused PCA; add the spectral-band PCA families when the spectra are clean; learners: ridge, PLS and random forest first, the others for comparison. Validation: repeated 10-fold with nested selection (default). Outputs: `<metrics>_<target>_ml_predictions.csv`, `_ml_results.json`, one `_ml_model_<family>_<learner>.joblib` per pair, `_ml_top_features.csv`.
 
 **Reading the table.** Report the held-out columns (cvR2, cvRMSE, rRMSE, accuracy), never the fit columns; a fit R² far above the cv R² is overfitting. Prefer the simplest model within about 0.02 R² of the best. The "within 5 cm" share (height) and rRMSE (biomass) are the numbers agronomists read. With fewer than about 60 labelled plots, use the linear calibration or ridge only.
+
+**Top-three ensembles (v3.3.3).** For reporting and prediction, use the average of the three best models of a category
+(LiDAR only, VNIR only or fused) rather than one winner: the differences between the best few models are smaller than
+the uncertainty of their scores (bootstrap SE of the RMSE 65-120 kg/ha for biomass, 0.2 cm for height). The research
+pipeline selects the three inside a nested cross-validation (`nested_top3.py`), so the quoted score is honest, and saves
+each ensemble as `<target>_<dataset>_<category>_top3_ensemble.joblib`. The "Apply a saved model" panels of the Height
+Models and Biomass ML tabs accept these files and average the members (the log names them and the nested score).
+Nested scores on the validation trials (R² / RMSE): biomass fused 0.37 / 1,516 (anthesis) and 0.21 / 1,283 (maturity),
+LiDAR only 0.34 / 1,553 and 0.18 / 1,311, VNIR only 0.25 / 1,656 and 0.09 / 1,378; height (maturity flight) fused
+0.53 / 3.5 cm, LiDAR only 0.40 / 4.0 cm, VNIR only 0.17 / 4.6 cm.
 
 ### 4. Test on held-out plots or on another flight
 

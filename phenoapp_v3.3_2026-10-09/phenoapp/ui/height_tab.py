@@ -218,12 +218,17 @@ class HeightTab(QWidget):
             QMessageBox.warning(self, "No model", "Pick a saved .joblib model."); return
         try:
             import pandas as pd
+            from phenoapp.core.ensembles import describe
             saved = load_height_model(p)
-            out = apply_height_model(pd.read_csv(m), saved, offset_cm=float(self.sp_offset.value()))
+            vcsv = self.ed_vnir3.text().strip() or (os.path.splitext(m)[0] + "_vnir_v3.csv")
+            vnir_df = pd.read_csv(vcsv) if os.path.exists(vcsv) else None
+            spc = vcsv.replace("_vnir_v3.csv", "_vnir_v3_spectra.csv") if vcsv.endswith("_vnir_v3.csv") else ""
+            spectra = pd.read_csv(spc) if spc and os.path.exists(spc) else None
+            out = apply_height_model(pd.read_csv(m), saved, offset_cm=float(self.sp_offset.value()), vnir_df=vnir_df, spectra=spectra)
             key = os.path.splitext(os.path.basename(p))[0].split("height_model_")[-1]
             outp = os.path.splitext(m)[0] + f"_height_applied_{key}.csv"; out.to_csv(outp, index=False)
             v = out.height_pred_cm.dropna()
-            self.out.setPlainText(f"Applied {os.path.basename(p)} (features: {', '.join(saved['features'])}) with offset {self.sp_offset.value():+.1f} cm\n"
+            self.out.setPlainText(f"Applied {os.path.basename(p)} ({describe(saved)}) with offset {self.sp_offset.value():+.1f} cm\n"
                                   f"{int(out.model_ok.sum())}/{len(out)} plots predicted; height mean {v.mean():.1f} cm, SD {v.std():.1f}, min {v.min():.1f}, max {v.max():.1f}\n\n"
                                   f"Predictions -> {outp}")
         except Exception as e:

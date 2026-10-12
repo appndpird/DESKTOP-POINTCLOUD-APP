@@ -261,18 +261,22 @@ def load_height_model(path):
     return joblib.load(path)
 
 
-def apply_height_model(df, saved, offset_cm: float = 0.0):
-    """Predict height (cm) for every plot of a metrics table with a saved model.
+def apply_height_model(df, saved, offset_cm: float = 0.0, vnir_df=None, spectra=None):
+    """Predict height (cm) for every plot of a metrics table with a saved model or a saved top-three mean ensemble.
     offset_cm is added to the prediction (per-flight correction from reference
-    targets or a few measured plots)."""
+    targets or a few measured plots). vnir_df / spectra: VNIR v3 features and the spectra table, needed by models
+    that use VNIR features or spectral bands (sb_<nm> columns)."""
     import pandas as pd
-    d = prepare_features(df)
-    feats = saved["features"]
-    X = d[feats].to_numpy(float)
-    ok = np.isfinite(X).all(axis=1)
-    pred = np.full(len(d), np.nan)
-    if ok.any():
-        pred[ok] = saved["model"].predict(X[ok]) + offset_cm
+    from .ensembles import predict_saved, required_features
+    d = prepare_features(df, vnir_df)
+    need = required_features(saved)
+    if spectra is not None and any(f.startswith("sb_") for f in need):
+        from .pca_families import spectra_matrix
+        d = d.merge(spectra_matrix(spectra), left_on="Plot_ID", right_index=True, how="left")
+    vc = [f for f in need if f in d.columns and not f.startswith("sb_") and d[f].dtype != object]
+    d[vc] = d[vc].fillna(d[vc].median())
+    pred, ok = predict_saved(saved, d)
+    pred = pred + offset_cm
     out = pd.DataFrame({"Plot_ID": d["Plot_ID"], "cth_p95_cm": d["cth_p95"], "height_pred_cm": pred, "offset_cm": offset_cm,
                         "model_ok": ok.astype(int)})
     return out

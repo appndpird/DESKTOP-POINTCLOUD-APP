@@ -182,9 +182,13 @@ class BiomassMLTab(QWidget):
         m, p = self.ed_metrics.text().strip(), self.ed_model.text().strip()
         if not (m and os.path.exists(m) and p and os.path.exists(p)): QMessageBox.warning(self, "Missing input", "Pick the metrics CSV and a saved model."); return
         try:
-            df = _load_inputs(m, self.ed_vnir.text().strip()); saved = load_model(p); out = apply_model(df, saved, float(self.sp_off.value()))
-            tgt = saved.get("meta", {}).get("target", "target"); outp = os.path.splitext(m)[0] + f"_{tgt}_applied_{os.path.splitext(os.path.basename(p))[0].split('_ml_model_')[-1]}.csv"
+            import pandas as pd
+            from phenoapp.core.ensembles import describe
+            df, _ = _load_inputs(m, self.ed_vnir.text().strip()); saved = load_model(p)
+            sp = _spectra_path(self.ed_vnir.text().strip(), self.ed_spectra.text().strip())
+            out = apply_model(df, saved, float(self.sp_off.value()), spectra=pd.read_csv(sp) if sp else None)
+            tgt = saved.get("meta", {}).get("target", saved.get("target", "target")); outp = os.path.splitext(m)[0] + f"_{tgt}_applied_{os.path.splitext(os.path.basename(p))[0].split('_ml_model_')[-1]}.csv"
             out.to_csv(outp, index=False); v = out.predicted.dropna()
-            self.out.setPlainText(f"Applied {os.path.basename(p)} (features: {', '.join(saved['features'])})\n{int(out.model_ok.sum())}/{len(out)} plots predicted; mean {v.mean():.4g}, SD {v.std():.4g}\n\nPredictions -> {outp}")
+            self.out.setPlainText(f"Applied {os.path.basename(p)} ({describe(saved)})\n{int(out.model_ok.sum())}/{len(out)} plots predicted; mean {v.mean():.4g}, SD {v.std():.4g}\n\nPredictions -> {outp}")
         except Exception as e:
             import traceback; QMessageBox.critical(self, "Apply failed", f"{e}\n\n{traceback.format_exc()}")

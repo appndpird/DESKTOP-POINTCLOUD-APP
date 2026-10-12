@@ -1,11 +1,15 @@
 # Plant Phenotyping from Point Clouds
 
-**Current version: PhenoApp v3.3.2 (2026-10-10)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
-**Windows executable:** GitHub Releases, tag `v3.3.2`, asset `PhenoApp_v3.3.2_win64.zip` (456 MB; unzip and run
+**Current version: PhenoApp v3.3.3 (2026-10-12)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
+**Windows executable:** GitHub Releases, tag `v3.3.3`, asset `PhenoApp_v3.3.3_win64.zip` (unzip and run
 `PhenoApp_v3\PhenoApp_v3.exe`; no Python needed except for the Deep Models tab, which uses an external torch environment).
+The same release carries `PhenoApp_v3.3.3_twostream_weights.zip` (all fold models of the final network runs).
 Build it yourself with `phenoapp_v3.3_2026-10-09/build_windows.bat` (PyInstaller, `phenoapp.spec`; torch is excluded on purpose).
-Saved models (feature models and two-stream ensembles): `research/2026-10-09/models/`.
-v3.3.2 bundles the common-band two-stream ensembles and the fine-tune option.
+Saved models: `research/2026-10-09/models/` (feature models, the top-three ensembles per category for height and biomass,
+the Muresk pooled models, earlier two-stream folds); results to quote: `research/2026-10-09/README.md`, section "Final results".
+v3.3.3: top-three ensembles (nested selection per category: LiDAR only, VNIR only, fused) applicable in the Height Models
+and Biomass ML tabs; network ensembles retrained with folds grouped by plot; height metrics on the flight with the ruler
+measurement only. v3.3.2 bundles the common-band two-stream ensembles and the fine-tune option.
 v3.3.1 adds the PCA feature families (LiDAR, VNIR, fused per modality, joint, spectral-band) to the Biomass ML tab and the
 matching PCA sets to the Height Models tab. `USER_GUIDE.md` is the end-to-end recipe for training, testing and inference
 (feature extraction, Height Models and Biomass ML tabs, applying saved models to another flight, offsets, command line,

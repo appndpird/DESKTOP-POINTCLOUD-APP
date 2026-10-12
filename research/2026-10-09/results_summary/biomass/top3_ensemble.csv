@@ -1,0 +1,16 @@
+dataset,rank,feature_set,learner,R2,RMSE,rmse_bootstrap_se_top
+agt_anthesis,1,Fused_bands_PCA,Ridge,0.185,1374.4,
+agt_anthesis,2,Fused_PCA_joint,Ridge,0.174,1384.0,
+agt_anthesis,3,Fused_PCA,Ridge,0.17,1386.9,
+agt_anthesis,ensemble,mean of top 3,,0.184,1374.8,64.6
+agt_maturity,1,LiDAR_PCA,Ridge,0.055,1846.7,
+agt_maturity,2,LiDAR_core,Ridge,0.046,1854.8,
+agt_maturity,ensemble,mean of top 3,,0.051,1850.1,83.7
+muresk_anthesis,1,Fused_PCA_joint,GPR,0.371,1512.8,
+muresk_anthesis,2,Fused_PCA,GPR,0.37,1514.6,
+muresk_anthesis,3,Fused_all,Ridge,0.341,1549.1,
+muresk_anthesis,ensemble,mean of top 3,,0.367,1517.4,120.1
+muresk_maturity,1,Fused_bands_PCA,LightGBM,0.266,1236.8,
+muresk_maturity,2,Fused_PCA_joint,RandomForest,0.235,1262.1,
+muresk_maturity,3,LiDAR_PCA,ExtraTrees,0.224,1268.0,
+muresk_maturity,ensemble,mean of top 3,,0.286,1219.5,69.6

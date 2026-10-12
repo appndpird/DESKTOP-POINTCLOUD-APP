@@ -23,8 +23,9 @@ from sklearn.model_selection import StratifiedKFold, StratifiedGroupKFold
 ap = argparse.ArgumentParser(); ap.add_argument("--target", default="biomass"); ap.add_argument("--epochs", type=int, default=100)
 ap.add_argument("--variants", default="two_stream,lidar_only,vnir_only"); ap.add_argument("--folds", type=int, default=10); ap.add_argument("--maxpts", type=int, default=16000)
 ap.add_argument("--device", default="cuda:0")
-ap.add_argument("--bands", default="common", choices=["per_plot", "common"],
-                help="per_plot: every band usable on the plot (NaN rule) with the availability mask; common: the fixed band list usable on >= 95 %% of the plots of every reflectance flight (dataset/vnir_common_bands.csv, column common_95), identical for all flights")
+ap.add_argument("--bands", default="common", choices=["per_plot", "common", "per_plot_all"],
+                help="per_plot: every band usable on the plot (NaN rule, excluded ranges dropped) with the availability mask; common: the fixed band list usable on >= 95 %% of the plots of every reflectance flight (dataset/vnir_common_bands.csv or --bands-csv), identical for all flights; "
+                     "per_plot_all: every band usable on the plot INCLUDING the excluded ranges (all 172 bands can enter)")
 ap.add_argument("--init", default=None, help="warm start (fine-tuning): folder of fold models (dl_<target>[_commonbands]_<variant>_fold<k>.pt or <variant>_<target>_fold<k>.pt) or one .pt file; "
                                              "encoders and head are loaded, the trial/stage embedding is re-initialised when the number of datasets differs")
 ap.add_argument("--init-lr", type=float, default=3e-4, help="peak learning rate when warm-starting (default 3e-4; 1e-3 from scratch)")
@@ -34,8 +35,9 @@ ap.add_argument("--group-by-plot", dest="group_by_plot", action="store_true", de
 ap.add_argument("--no-group-by-plot", dest="group_by_plot", action="store_false", help="plain stratified folds by sample (the runs of 9-10 Oct 2026 used this; optimistic for height, where both flights share one ruler value per plot)")
 ap.add_argument("--tag", default="", help="suffix appended to the output file names (e.g. _grouped)")
 ap.add_argument("--datasets", default=None, help="comma-separated dataset names to use (default: every dataset with the target); e.g. muresk_maturity for height, where only the maturity flight has a ruler measurement")
+ap.add_argument("--bands-csv", default=None, help="with --bands common: CSV with wavelength_nm and common_95 columns to use instead of dataset/vnir_common_bands.csv (e.g. the Muresk-only list)")
 args = ap.parse_args()
-TAG = ("" if args.bands == "per_plot" else "_commonbands") + args.tag      # output files of the common-band run sit next to the per-plot ones
+TAG = {"per_plot": "", "common": "_commonbands", "per_plot_all": "_allbands"}[args.bands] + args.tag      # output files of each band policy sit side by side
 B = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment"
 OUT = os.path.join(B, "Biomass_Height_2026-10-09", "two_stream"); DATA = os.path.join(OUT, "dl_data"); RES = os.path.join(OUT, "results"); MOD = os.path.join(OUT, "models")
 os.makedirs(RES, exist_ok=True); os.makedirs(MOD, exist_ok=True)
@@ -57,9 +59,12 @@ EXCL = np.zeros(len(wl), bool)
 for lo, hi in ((0, 415), (755, 770), (928, 962)): EXCL |= (wl >= lo) & (wl <= hi)
 COMMON = None
 if args.bands == "common":
-    cb = pd.read_csv(os.path.join(B, "Biomass_Height_2026-10-09", "dataset", "vnir_common_bands.csv")); cw = cb.wavelength_nm.to_numpy(float); cok = cb.common_95.to_numpy() == 1
+    cbp = args.bands_csv or os.path.join(B, "Biomass_Height_2026-10-09", "dataset", "vnir_common_bands.csv")
+    cb = pd.read_csv(cbp); cw = cb.wavelength_nm.to_numpy(float); cok = cb.common_95.to_numpy() == 1
     COMMON = np.array([bool(cok[np.argmin(np.abs(cw - w))]) and abs(cw[np.argmin(np.abs(cw - w))] - w) < 0.5 for w in wl])
-    log(f"band policy: common - {int(COMMON.sum())} bands usable on >= 95 % of the plots of every reflectance flight, identical for all plots (per-plot NaN mask not used; clipped pixels still ignored)")
+    log(f"band policy: common - {int(COMMON.sum())} fixed bands from {os.path.basename(cbp)}, identical for all plots (per-plot NaN mask not used; clipped pixels still ignored)")
+elif args.bands == "per_plot_all":
+    EXCL[:] = False; log("band policy: per_plot_all - every band usable on the plot (NaN rule), excluded ranges INCLUDED, availability mask given to the network")
 else:
     log("band policy: per_plot - every band usable on the plot (NaN rule + excluded ranges), availability mask given to the network")
 DSETS = sorted(idx.dataset.unique()); ds_id = {d: i for i, d in enumerate(DSETS)}

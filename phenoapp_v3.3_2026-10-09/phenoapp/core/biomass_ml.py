@@ -224,9 +224,14 @@ def load_model(path):
 def apply_model(df, saved, offset=0.0, spectra=None):
     """spectra: mean vegetation spectra table of the flight, needed by the *_bands_PCA models (columns sb_<nm>)."""
     import pandas as pd
-    d = add_weighted(df); feats = saved["features"]
+    from .ensembles import is_ensemble, predict_saved, required_features
+    d = add_weighted(df); feats = required_features(saved)
     if spectra is not None and any(f.startswith("sb_") for f in feats):
         d = d.merge(spectra_matrix(spectra), left_on="Plot_ID", right_index=True, how="left")
+    if is_ensemble(saved):
+        d[[f for f in feats if f in d.columns]] = d[[f for f in feats if f in d.columns]].fillna(d[[f for f in feats if f in d.columns]].median())
+        p, ok = predict_saved(saved, d)
+        return pd.DataFrame({"Plot_ID": d.Plot_ID, "predicted": p + offset, "model_ok": ok.astype(int)})
     missing = [f for f in feats if f not in d.columns]
     if missing:
         raise ValueError("metrics table lacks " + ", ".join(missing))
