@@ -154,6 +154,7 @@ def main():
                     help="training only: 'common' = the fixed band list of common_bands.csv (next to this script's bundled weights, or --bands-csv), identical for every plot; "
                          "'per_plot' = every band usable on the plot with the availability mask. Prediction follows the ensemble: common when its folder holds common_bands.csv.")
     ap.add_argument("--bands-csv", default=None, help="CSV with wavelength_nm and common_95 columns (default: the bundled assets/dl_models/common_bands.csv)")
+    ap.add_argument("--folds-select", default="all", help="predict only: 'all' fold models (default), 'best3' / 'bestN' = the N folds with the lowest test RMSE in fold_scores.csv, or a comma list of fold indices (0-based)")
     ap.add_argument("--init", default=None, help="training only: warm start (fine-tune) from a folder of fold models (<variant>_<target>_fold<k>.pt, e.g. the bundled ensemble) or one .pt file; "
                                                  "encoders and head are loaded, the trial/stage embedding is re-initialised when the dataset count differs")
     ap.add_argument("--init-lr", type=float, default=3e-4, help="peak learning rate when warm-starting (default 3e-4; 1e-3 from scratch)")
@@ -175,6 +176,20 @@ def main():
         files = sorted([f for f in os.listdir(a.weights) if f.startswith(f"two_stream_{a.target}_fold") and f.endswith(".pt")]) if a.variant == "two_stream" else \
                 sorted([f for f in os.listdir(a.weights) if f.startswith(f"{a.variant}_{a.target}_fold") and f.endswith(".pt")])
         if not files: raise SystemExit(f"no weights for {a.variant}/{a.target} in {a.weights}")
+        # fold selection: all fold models (default), the N with the lowest test RMSE (fold_scores.csv next to the weights), or a list
+        if a.folds_select and a.folds_select != "all":
+            import pandas as pd_
+            fsel = a.folds_select
+            if fsel.startswith("best"):
+                sp_ = os.path.join(a.weights, "fold_scores.csv")
+                if not os.path.exists(sp_): raise SystemExit("--folds-select best: fold_scores.csv not found next to the weights")
+                fs_ = pd_.read_csv(sp_); fs_ = fs_[(fs_.variant == a.variant) & (fs_.target == a.target)].sort_values("RMSE")
+                keep = set(fs_.fold_index.head(int(fsel[4:] or 3)).astype(int))
+            else:
+                keep = {int(k) for k in fsel.split(",")}
+            files = [f for f in files if int(f.split("_fold")[-1].split(".")[0]) in keep]
+            if not files: raise SystemExit(f"--folds-select {fsel}: no matching fold files")
+            print(f"[two_stream] fold models used: {', '.join(f.split('_fold')[-1].split('.')[0] for f in files)} ({fsel}; ranking folds by their test score selects on the test sets - quote accuracy from the all-folds CV)", flush=True)
         # target normalisation of the pretrained models (fixed from the training set: log kg/ha over 760 plots, cm over 256 plots)
         norm = {"biomass": (9.239603, 0.227668), "height": (84.656250, 5.091641)}[a.target]
         common = load_common_bands(a.weights, wl)

@@ -136,7 +136,43 @@ def _select(Xtr, ytr, k):
     return list(np.argsort(rf.feature_importances_)[::-1][:k])
 
 
-def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_select=12, progress_cb=None, scale_y=None, vnir_cols=None, spectra=None):
+PLOT_RULES = {"all": "all plots with usable LiDAR (VNIR families: VNIR QC passed)",
+              "A": "valid bands only, rule A: every band valid on >= 50 % of the plot's pixels",
+              "B": "valid bands only, rule B: every band valid on >= 95 % of the plot's pixels, plot inside the cube"}
+
+
+def valid_band_plots(vnir_df, valid_fraction_df, rule="A", band_list=None):
+    """Plot_IDs whose spectra have no band problem.
+    vnir_df           : VNIR v3 features (Plot_ID, vnir_qc_ok, vnir_reflectance_ok, frac_in_cube)
+    valid_fraction_df : <metrics>_vnir_v3_band_valid_fraction.csv (Plot_ID + one column per wavelength: share of valid pixels)
+    rule              : "A" (>= 50 % of pixels valid in every band) or "B" (>= 95 %, and >= 95 % of the plot inside the cube)
+    band_list         : wavelengths (nm) to check; default = the bundled common band list (assets/dl_models/common_bands.csv),
+                        i.e. the bands usable across flights; falls back to every band outside the excluded ranges."""
+    import pandas as pd
+    from .spectral_indices import DEFAULT_EXCLUDED_NM
+    wcols = [c for c in valid_fraction_df.columns if c != "Plot_ID"]; wl = np.array([float(c) for c in wcols])
+    if band_list is None:
+        cb = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "dl_models", "common_bands.csv")
+        if os.path.exists(cb):
+            t = pd.read_csv(cb); band_list = t.wavelength_nm[t.common_95 == 1].to_numpy(float)
+    if band_list is not None:
+        use = np.array([np.min(np.abs(np.asarray(band_list, float) - w)) < 0.5 for w in wl])
+    else:
+        use = np.ones(len(wl), bool)
+        for lo, hi in DEFAULT_EXCLUDED_NM: use &= ~((wl >= lo) & (wl <= hi))
+    thr = 0.5 if str(rule).upper() == "A" else 0.95
+    F = valid_fraction_df.set_index("Plot_ID")[np.array(wcols)[use]].astype(float)
+    ok = (F >= thr).all(axis=1)
+    V = vnir_df.set_index("Plot_ID")
+    for col, cond in (("vnir_qc_ok", lambda s: s == 1), ("vnir_reflectance_ok", lambda s: s == 1)):
+        if col in V.columns: ok &= cond(V[col].reindex(F.index).fillna(0))
+    if str(rule).upper() == "B" and "frac_in_cube" in V.columns:
+        ok &= V.frac_in_cube.reindex(F.index).fillna(0) >= 0.95
+    return set(F.index[ok.to_numpy()])
+
+
+def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_select=12, progress_cb=None, scale_y=None, vnir_cols=None, spectra=None, plot_ids=None):
+    """plot_ids: optional set of Plot_IDs to use (e.g. valid_band_plots(...)); None = every plot with LiDAR QC ok."""
     """Nested cross-validated fit of `target_col` (from gt, joined on Plot_ID) on the chosen families x learners.
     vnir_cols : columns of the VNIR features CSV (tells the PCA families which block a column belongs to)
     spectra   : mean vegetation spectra table (Plot_ID + one column per wavelength) for the *_bands_PCA families"""
@@ -146,6 +182,8 @@ def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_selec
     d = add_weighted(df).merge(gt[["Plot_ID", target_col]].dropna(), on="Plot_ID", how="inner")
     if "qc_ok" in d.columns:
         d = d[d.qc_ok == 1]
+    if plot_ids is not None:
+        d = d[d.Plot_ID.isin(plot_ids)]
     if spectra is not None and any(f.endswith("bands_PCA") for f in families):
         sb = spectra_matrix(spectra)
         if len(sb.columns):
@@ -221,16 +259,17 @@ def load_model(path):
     return joblib.load(path)
 
 
-def apply_model(df, saved, offset=0.0, spectra=None):
-    """spectra: mean vegetation spectra table of the flight, needed by the *_bands_PCA models (columns sb_<nm>)."""
+def apply_model(df, saved, offset=0.0, spectra=None, folds="all"):
+    """spectra: mean vegetation spectra table of the flight, needed by the *_bands_PCA models (columns sb_<nm>).
+    folds: for fold-ensemble files, "all" | "best3" | list of fold numbers (see core.ensembles)."""
     import pandas as pd
-    from .ensembles import is_ensemble, predict_saved, required_features
-    d = add_weighted(df); feats = required_features(saved)
+    from .ensembles import is_ensemble, is_fold_ensembles, predict_saved, required_features
+    d = add_weighted(df); feats = required_features(saved, folds)
     if spectra is not None and any(f.startswith("sb_") for f in feats):
         d = d.merge(spectra_matrix(spectra), left_on="Plot_ID", right_index=True, how="left")
-    if is_ensemble(saved):
+    if is_ensemble(saved) or is_fold_ensembles(saved):
         d[[f for f in feats if f in d.columns]] = d[[f for f in feats if f in d.columns]].fillna(d[[f for f in feats if f in d.columns]].median())
-        p, ok = predict_saved(saved, d)
+        p, ok = predict_saved(saved, d, folds)
         return pd.DataFrame({"Plot_ID": d.Plot_ID, "predicted": p + offset, "model_ok": ok.astype(int)})
     missing = [f for f in feats if f not in d.columns]
     if missing:

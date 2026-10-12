@@ -31,7 +31,26 @@ on held-out plots or on another flight, and predict plots that have no ground tr
 
 **Biomass or any per-plot trait, Biomass ML tab (tab 9).** Inputs: metrics CSV, VNIR v3 CSV, ground-truth CSV, the spectra CSV is found automatically; set the target column. Families: start with LiDAR core, fused core, LiDAR PCA and fused PCA; add the spectral-band PCA families when the spectra are clean; learners: ridge, PLS and random forest first, the others for comparison. Validation: repeated 10-fold with nested selection (default). Outputs: `<metrics>_<target>_ml_predictions.csv`, `_ml_results.json`, one `_ml_model_<family>_<learner>.joblib` per pair, `_ml_top_features.csv`.
 
+**Plots (v3.3.4).** The "Plots" selector of the Biomass ML tab restricts training and validation to plots whose spectra have
+no band problem. *Rule A* keeps a plot when every band of the common band list (the bands usable across flights, shipped
+in `assets/dl_models/common_bands.csv`) is unclipped on at least 50 % of the plot's pixels; *rule B* asks for 95 % and the
+plot entirely inside the cube. Both also require VNIR QC passed and a reflectance cube. It reads
+`<metrics>_vnir_v3_band_valid_fraction.csv` (VNIR Spectral tab) and suffixes the outputs with `_ruleA` / `_ruleB`. On the
+validation trials rule A kept 497 of 760 plot-flights (no plot of a radiance flight) and rule B 209 (one trial only: the
+other trial's red bands were partly clipped on every plot). Use rule B to build reference models on clean spectra, rule A
+for the usual case; the default ("all plots") still drops VNIR-failing plots from the families that use VNIR.
+
 **Reading the table.** Report the held-out columns (cvR2, cvRMSE, rRMSE, accuracy), never the fit columns; a fit R² far above the cv R² is overfitting. Prefer the simplest model within about 0.02 R² of the best. The "within 5 cm" share (height) and rRMSE (biomass) are the numbers agronomists read. With fewer than about 60 labelled plots, use the linear calibration or ridge only.
+
+**Top-three ensembles (v3.3.3).** For reporting and prediction, use the average of the three best models of a category
+(LiDAR only, VNIR only or fused) rather than one winner: the differences between the best few models are smaller than
+the uncertainty of their scores (bootstrap SE of the RMSE 65-120 kg/ha for biomass, 0.2 cm for height). The research
+pipeline selects the three inside a nested cross-validation (`nested_top3.py`), so the quoted score is honest, and saves
+each ensemble as `<target>_<dataset>_<category>_top3_ensemble.joblib`. The "Apply a saved model" panels of the Height
+Models and Biomass ML tabs accept these files and average the members (the log names them and the nested score).
+Nested scores on the validation trials (R² / RMSE): biomass fused 0.37 / 1,516 (anthesis) and 0.21 / 1,283 (maturity),
+LiDAR only 0.34 / 1,553 and 0.18 / 1,311, VNIR only 0.25 / 1,656 and 0.09 / 1,378; height (maturity flight) fused
+0.53 / 3.5 cm, LiDAR only 0.40 / 4.0 cm, VNIR only 0.17 / 4.6 cm.
 
 ### 4. Test on held-out plots or on another flight
 

@@ -1,5 +1,15 @@
 # Plant Phenotyping from Point Clouds
 
+**v3.3.4 (2026-10-12) - valid-band plot selection.** The Biomass ML tab gains a "Plots" selector: all plots (default), or
+only the plots whose spectra have no band problem - rule A (every band of the common band list unclipped on >= 50 % of the
+plot's pixels) or rule B (>= 95 %, plot entirely inside the cube); both require VNIR QC and a reflectance cube. API:
+`biomass_ml.valid_band_plots(vnir_df, valid_fraction_df, rule)`, `fit_trait_models(..., plot_ids=)`.
+**Fold models:** the apply panels of the Height Models and Biomass ML tabs read `*_fold_ensembles.joblib` (one top-three
+ensemble per cross-validation fold, with its test score) and predict with all fold models (default) or the best three; the
+Deep Models tab bundles all 10 fold models of each network variant with `fold_scores.csv` and offers the same choice
+(`two_stream.py predict --folds-select all|best3|0,3,9`). The best-three choice ranks folds on their test sets, so its
+accuracy is quoted from the all-folds cross-validation. `core.ensembles`: `select_folds`, `fold_table`.
+
 **v3.3.3 (2026-10-12) - top-three ensembles, grouped-fold network, height on the measured flight only.**
 `phenoapp/core/ensembles.py`: the "Apply a saved model" panels of the Height Models and Biomass ML tabs accept mean
 ensembles (`{"type": "mean_ensemble", "members": [...]}`) as written by the research pipeline's nested top-three

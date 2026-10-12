@@ -1,7 +1,7 @@
 <title>Height and Biomass Models 2026-10-09</title><style>body{font-family:Segoe UI,Arial,sans-serif;max-width:1180px;margin:0 auto;padding:20px;color:#1b1b1b;line-height:1.45}h1{font-size:1.7rem}h2{margin-top:36px;border-bottom:2px solid #ddd;padding-bottom:4px}h3{margin-top:22px}
 table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-nums}th,td{padding:4px 8px;border-bottom:1px solid #e3e3e3;text-align:right}th:first-child,td:first-child,td:nth-child(2),th:nth-child(2){text-align:left}th{background:#f3f4f2;position:sticky;top:0}
 .tw{overflow-x:auto;margin:8px 0 16px}img{max-width:100%;height:auto;border:1px solid #e3e3e3;border-radius:6px;margin:6px 0}.note{background:#f6f8f5;border-left:4px solid #1f6f4a;padding:8px 14px;margin:12px 0}.warn{background:#fff4f2;border-left:4px solid #b3261e;padding:8px 14px;margin:12px 0}.small{color:#666;font-size:.85rem}</style><h1>Plant height and biomass models from GOBI LiDAR + VNIR — Muresk and AGT NUE trials 2025 (rebuild of 9 October 2026)</h1>
-<p class='small'>Built 2026-10-12 14:15 on Dataset_2026-10-09 with PhenoApp v3.3 (v3.2 LiDAR pipeline: gap noise rule, plot-local ground, canopy classification, interior gap metrics; v3.0.1 VNIR: NaN rule for unusable bands, flight-level reflectance check, red-clipping censoring). Validation: nested repeated 10-fold CV (feature selection inside each fold), LOOCV for the top height models, leave-one-flight-out and cross-trial transfer; the two-stream network uses 10-fold CV stratified by dataset.</p>
+<p class='small'>Built 2026-10-12 15:45 on Dataset_2026-10-09 with PhenoApp v3.3 (v3.2 LiDAR pipeline: gap noise rule, plot-local ground, canopy classification, interior gap metrics; v3.0.1 VNIR: NaN rule for unusable bands, flight-level reflectance check, red-clipping censoring). Validation: nested repeated 10-fold CV (feature selection inside each fold), LOOCV for the top height models, leave-one-flight-out and cross-trial transfer; the two-stream network uses 10-fold CV stratified by dataset.</p>
 <div class='warn'><b>Data limits carried into this rebuild.</b> AGT 2025-11-13 (maturity): both VNIR orthomosaics are at-sensor radiance, not reflectance, so every VNIR value is NaN and the dataset is modelled LiDAR-only. AGT 2025-09-22 (anthesis): the 670 nm band is clipped to zero on about half of the plot pixels; red-based indices are NaN on plots with red_ok = 0 and are dropped from the models when missing on more than 5 % of plots. Muresk: blue bands clipped (not used by the core features). The 'accuracy' column is 100 - MAPE and reflects the spread of the target, not model skill.</div>
 <h2>1. Dataset</h2>
 <div class='tw'><table class="dataframe">
@@ -4647,6 +4647,17 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>1393.9 ± 140.7</td>
     </tr>
     <tr>
+      <td>A</td>
+      <td>fused</td>
+      <td>deep learning (two-stream net)</td>
+      <td>497</td>
+      <td>3</td>
+      <td>0.16</td>
+      <td>1472.08</td>
+      <td>15.70</td>
+      <td>1461.7 ± 178.1</td>
+    </tr>
+    <tr>
       <td>B</td>
       <td>lidar</td>
       <td>features (nested top 3)</td>
@@ -4850,6 +4861,22 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
     </tr>
   </thead>
   <tbody>
+    <tr>
+      <th></th>
+      <td>A</td>
+      <td>fused</td>
+      <td>deep learning (two-stream net)</td>
+      <td>0.17 / 1593.4</td>
+      <td>0.17 / 1179.4</td>
+      <td>-0.02 / 1677.1</td>
+      <td>-0.03 / 1752.2</td>
+      <td>0.2 / 1437.5</td>
+      <td>0.07 / 1528.1</td>
+      <td>0.21 / 1358.9</td>
+      <td>0.23 / 1393.7</td>
+      <td>0.18 / 1424.7</td>
+      <td>0.13 / 1271.6</td>
+    </tr>
     <tr>
       <th></th>
       <td>A</td>
@@ -7237,6 +7264,14 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
     <tr>
       <th></th>
       <td>biomass</td>
+      <td>agt_maturity</td>
+      <td>0.05 / 1849.1</td>
+      <td>-</td>
+      <td>-</td>
+    </tr>
+    <tr>
+      <th></th>
+      <td>biomass</td>
       <td>muresk_anthesis</td>
       <td>0.34 / 1552.9</td>
       <td>0.25 / 1655.6</td>
@@ -7394,6 +7429,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>1384.69</td>
       <td>Fused_bands_PCA/Ridge | Fused_bands_PCA/GPR | Fused_PCA_joint/Ridge</td>
       <td>biomass_agt_anthesis_fused_top3_ensemble.joblib</td>
+    </tr>
+    <tr>
+      <td>biomass</td>
+      <td>agt_maturity</td>
+      <td>lidar</td>
+      <td>252</td>
+      <td>0.05</td>
+      <td>1849.08</td>
+      <td>LiDAR_PCA/Ridge | LiDAR_core/Ridge | LiDAR_core/PLS</td>
+      <td>biomass_agt_maturity_lidar_top3_ensemble.joblib</td>
     </tr>
   </tbody>
 </table></div>

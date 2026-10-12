@@ -713,6 +713,22 @@ on held-out plots or on another flight, and predict plots that have no ground tr
 
 **Biomass or any per-plot trait, Biomass ML tab (tab 9).** Inputs: metrics CSV, VNIR v3 CSV, ground-truth CSV, the spectra CSV is found automatically; set the target column. Families: start with LiDAR core, fused core, LiDAR PCA and fused PCA; add the spectral-band PCA families when the spectra are clean; learners: ridge, PLS and random forest first, the others for comparison. Validation: repeated 10-fold with nested selection (default). Outputs: `<metrics>_<target>_ml_predictions.csv`, `_ml_results.json`, one `_ml_model_<family>_<learner>.joblib` per pair, `_ml_top_features.csv`.
 
+**Plots (v3.3.4).** The "Plots" selector of the Biomass ML tab restricts training and validation to plots whose spectra have
+no band problem. *Rule A* keeps a plot when every band of the common band list (the bands usable across flights, shipped
+in `assets/dl_models/common_bands.csv`) is unclipped on at least 50 % of the plot's pixels; *rule B* asks for 95 % and the
+plot entirely inside the cube. Both also require VNIR QC passed and a reflectance cube. It reads
+`<metrics>_vnir_v3_band_valid_fraction.csv` (VNIR Spectral tab) and suffixes the outputs with `_ruleA` / `_ruleB`. On the
+validation trials rule A kept 497 of 760 plot-flights (no plot of a radiance flight) and rule B 209 (one trial only: the
+other trial's red bands were partly clipped on every plot). Use rule B to build reference models on clean spectra, rule A
+for the usual case; the default ("all plots") still drops VNIR-failing plots from the families that use VNIR.
+
+**Fold models (v3.3.4).** Cross-validation trains one model per fold. The research pipeline saves them as
+`*_fold_ensembles.joblib` (each fold's top-three ensemble with its test score), and the Deep Models tab ships the 10 fold
+models of each network variant with `fold_scores.csv`. In every "Apply" / "Predict" panel the "Fold models" selector
+averages all fold models (default, recommended) or only the three with the lowest test RMSE. The log lists every fold's
+score and marks the best three. Use the best three if you prefer them, but report accuracy from the all-folds
+cross-validation: the folds were ranked on their own test plots, so their scores flatter them.
+
 **Reading the table.** Report the held-out columns (cvR2, cvRMSE, rRMSE, accuracy), never the fit columns; a fit R² far above the cv R² is overfitting. Prefer the simplest model within about 0.02 R² of the best. The "within 5 cm" share (height) and rRMSE (biomass) are the numbers agronomists read. With fewer than about 60 labelled plots, use the linear calibration or ridge only.
 
 **Top-three ensembles (v3.3.3).** For reporting and prediction, use the average of the three best models of a category

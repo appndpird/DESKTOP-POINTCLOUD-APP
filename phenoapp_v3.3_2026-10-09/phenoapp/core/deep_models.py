@@ -168,11 +168,12 @@ def prepare_plot_tensors(mgr, cube, plots, out_dir, dataset_name, stage, gt=None
 
 
 def run_two_stream(python_exe, mode, data_dir, out, target="biomass", device="auto", variant="two_stream", weights=None, epochs=100, folds=10, log_cb=None,
-                   init=None, bands="common"):
-    """init: folder of fold models to warm-start from (fine-tuning; e.g. pretrained_weights_dir()); bands: 'common' | 'per_plot' for training."""
+                   init=None, bands="common", folds_select="all"):
+    """init: folder of fold models to warm-start from (fine-tuning; e.g. pretrained_weights_dir()); bands: 'common' | 'per_plot' for training;
+    folds_select (predict): 'all' | 'best3' | comma list of fold indices."""
     cmd = [python_exe, "-u", script_path(), mode, "--data", data_dir, "--target", target, "--device", device, "--variant", variant, "--out", out]
     if mode == "predict":
-        cmd += ["--weights", weights or pretrained_weights_dir()]
+        cmd += ["--weights", weights or pretrained_weights_dir(), "--folds-select", folds_select or "all"]
     else:
         cmd += ["--epochs", str(epochs), "--folds", str(folds), "--bands", bands]
         if init:

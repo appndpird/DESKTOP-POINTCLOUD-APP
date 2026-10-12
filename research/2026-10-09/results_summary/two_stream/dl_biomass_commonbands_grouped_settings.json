@@ -3,7 +3,7 @@
  "epochs": 100,
  "folds": 10,
  "maxpts": 16000,
- "variants_this_run": "two_stream,lidar_only",
+ "variants_this_run": "vnir_only",
  "device": "cuda:1",
  "n": 760,
  "band_policy": "common",

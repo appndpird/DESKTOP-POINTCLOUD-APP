@@ -143,6 +143,11 @@ class HeightTab(QWidget):
         self.btn_apply = QPushButton("Predict heights for every plot"); self.btn_apply.clicked.connect(self._run_apply)
         rowo = QHBoxLayout(); rowo.addWidget(self.sp_offset); rowo.addWidget(self.btn_apply); rowo.addStretch()
         f3.addRow("Offset:", rowo)
+        from phenoapp.core.ensembles import FOLD_CHOICES
+        self.cb_folds = QComboBox(); self.cb_folds.addItems([FOLD_CHOICES["all"], FOLD_CHOICES["best3"]])
+        self.cb_folds.setToolTip("Only for *_fold_ensembles.joblib files: average all 10 fold ensembles, or the three folds with the lowest test RMSE "
+                                 "(optimistic: the folds are ranked on their test sets; quote accuracy from the all-folds cross-validation).")
+        f3.addRow("Fold models:", self.cb_folds)
         v.addWidget(g3)
 
         self.progress = QProgressBar(); self.progress.setTextVisible(True); v.addWidget(self.progress)
@@ -218,19 +223,21 @@ class HeightTab(QWidget):
             QMessageBox.warning(self, "No model", "Pick a saved .joblib model."); return
         try:
             import pandas as pd
-            from phenoapp.core.ensembles import describe
+            from phenoapp.core.ensembles import describe, fold_table, is_fold_ensembles
             saved = load_height_model(p)
+            folds = ("all", "best3")[self.cb_folds.currentIndex()] if is_fold_ensembles(saved) else "all"
             vcsv = self.ed_vnir3.text().strip() or (os.path.splitext(m)[0] + "_vnir_v3.csv")
             vnir_df = pd.read_csv(vcsv) if os.path.exists(vcsv) else None
             spc = vcsv.replace("_vnir_v3.csv", "_vnir_v3_spectra.csv") if vcsv.endswith("_vnir_v3.csv") else ""
             spectra = pd.read_csv(spc) if spc and os.path.exists(spc) else None
-            out = apply_height_model(pd.read_csv(m), saved, offset_cm=float(self.sp_offset.value()), vnir_df=vnir_df, spectra=spectra)
-            key = os.path.splitext(os.path.basename(p))[0].split("height_model_")[-1]
+            out = apply_height_model(pd.read_csv(m), saved, offset_cm=float(self.sp_offset.value()), vnir_df=vnir_df, spectra=spectra, folds=folds)
+            key = os.path.splitext(os.path.basename(p))[0].split("height_model_")[-1] + (f"_{folds}" if is_fold_ensembles(saved) else "")
             outp = os.path.splitext(m)[0] + f"_height_applied_{key}.csv"; out.to_csv(outp, index=False)
-            v = out.height_pred_cm.dropna()
-            self.out.setPlainText(f"Applied {os.path.basename(p)} ({describe(saved)}) with offset {self.sp_offset.value():+.1f} cm\n"
+            v = out.height_pred_cm.dropna(); ft = fold_table(saved)
+            self.out.setPlainText(f"Applied {os.path.basename(p)} ({describe(saved, folds)}) with offset {self.sp_offset.value():+.1f} cm\n"
                                   f"{int(out.model_ok.sum())}/{len(out)} plots predicted; height mean {v.mean():.1f} cm, SD {v.std():.1f}, min {v.min():.1f}, max {v.max():.1f}\n\n"
-                                  f"Predictions -> {outp}")
+                                  f"Predictions -> {outp}"
+                                  + (("\n\nFold ensembles (test score of each fold; * = best three):\n" + ft.assign(best3=ft.best3.map({True: "*", False: ""})).to_string(index=False)) if ft is not None else ""))
         except Exception as e:
             import traceback
             QMessageBox.critical(self, "Apply failed", f"{e}\n\n{traceback.format_exc()}")

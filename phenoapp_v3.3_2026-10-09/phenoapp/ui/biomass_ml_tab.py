@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPush
 
 from phenoapp.core.project import state
 from phenoapp.core.biomass_ml import (FAMILIES, LEARNERS, fit_trait_models, results_table, save_model, load_model, apply_model,
-                                      learner_available, feature_family, add_weighted)
+                                      learner_available, feature_family, add_weighted, valid_band_plots, PLOT_RULES)
 
 
 def _load_inputs(metrics_csv, vnir_csv):
@@ -47,7 +47,7 @@ class _Worker(QThread):
     progress = pyqtSignal(int, str); done_ok = pyqtSignal(str); error = pyqtSignal(str)
 
     def __init__(self, metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select, spectra_csv=""):
-        super().__init__(); self._a = (metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select, spectra_csv)
+        super().__init__(); self._a = (metrics_csv, vnir_csv, gt_csv, target, families, learners, cv, n_select, spectra_csv); self.plot_rule = "all"
 
     def run(self):
         try:
@@ -57,10 +57,18 @@ class _Worker(QThread):
             if target not in gt.columns:
                 raise RuntimeError(f"ground-truth CSV has no column '{target}' (columns: {', '.join(gt.columns)})")
             sp_path = _spectra_path(vnir_csv, spectra_csv); spectra = pd.read_csv(sp_path) if sp_path else None
+            plot_ids = None; rule_txt = ""
+            if self.plot_rule in ("A", "B"):
+                vfp = vnir_csv.replace("_vnir_v3.csv", "_vnir_v3_band_valid_fraction.csv") if vnir_csv else ""
+                if not (vfp and os.path.exists(vfp)):
+                    raise RuntimeError("the valid-band plot rule needs <metrics>_vnir_v3_band_valid_fraction.csv next to the VNIR v3 CSV (written by the VNIR Spectral tab)")
+                plot_ids = valid_band_plots(pd.read_csv(vnir_csv), pd.read_csv(vfp), rule=self.plot_rule)
+                rule_txt = f"\nPlots: {PLOT_RULES[self.plot_rule]} -> {len(plot_ids)} plots kept"
+                self.progress.emit(1, f"valid-band rule {self.plot_rule}: {len(plot_ids)} plots")
             results, pred, fitted = fit_trait_models(df, gt, target, families, learners, cv=cv, n_select=n_select,
                                                      progress_cb=lambda p, m: self.progress.emit(min(98, p), m),
-                                                     vnir_cols=vnir_cols, spectra=spectra)
-            base = os.path.splitext(metrics_csv)[0] + f"_{target}"
+                                                     vnir_cols=vnir_cols, spectra=spectra, plot_ids=plot_ids)
+            base = os.path.splitext(metrics_csv)[0] + f"_{target}" + (f"_rule{self.plot_rule}" if self.plot_rule in ("A", "B") else "")
             pred.to_csv(base + "_ml_predictions.csv", index=False)
             saved = {}
             for (fam, ln), (model, feats) in fitted.items():
@@ -91,7 +99,7 @@ class _Worker(QThread):
                                  for r in {r["family"]: r for r in pca_rows}.values())
             if sp_path:
                 txt += f"\nSpectra table used for the band PCA families: {sp_path}"
-            txt += f"\n\nPredictions -> {base}_ml_predictions.csv\nResults -> {base}_ml_results.json\nModels -> {len(saved)} joblib files"
+            txt += rule_txt + f"\n\nPredictions -> {base}_ml_predictions.csv\nResults -> {base}_ml_results.json\nModels -> {len(saved)} joblib files"
             self.progress.emit(100, "done"); self.done_ok.emit(txt)
         except Exception as e:
             import traceback; self.error.emit(f"{e}\n\n{traceback.format_exc()}")
@@ -140,12 +148,25 @@ class BiomassMLTab(QWidget):
         self.cb_cv = QComboBox(); self.cb_cv.addItems(["Repeated 10-fold (5x), nested feature selection - recommended", "Leave-one-out", "Fit only"])
         self.sp_sel = QSpinBox(); self.sp_sel.setRange(3, 60); self.sp_sel.setValue(12); self.sp_sel.setToolTip("Features kept per training fold (random-forest importance inside the fold); families with fewer features use all.")
         row = QHBoxLayout(); row.addWidget(self.cb_cv, stretch=3); row.addWidget(QLabel("features kept:")); row.addWidget(self.sp_sel); f2.addRow("Validation:", row)
+        self.cb_plots = QComboBox(); self.cb_plots.addItems([PLOT_RULES["all"], PLOT_RULES["A"], PLOT_RULES["B"]])
+        self.cb_plots.setToolTip("Which plots enter the models. The valid-band rules keep only plots whose spectra have no band problem: every band of the "
+                                 "common band list (bands usable across flights) must be unclipped on at least 50 % (rule A) or 95 % (rule B, plus the plot "
+                                 "entirely inside the cube) of the plot's pixels, with VNIR QC passed and a reflectance cube. Needs "
+                                 "<metrics>_vnir_v3_band_valid_fraction.csv from the VNIR Spectral tab. Outputs get a _ruleA / _ruleB suffix.")
+        f2.addRow("Plots:", self.cb_plots)
         self.btn = QPushButton("Fit, validate and save"); self.btn.clicked.connect(self._run); f2.addRow("", self.btn)
         v.addWidget(g2)
         g3 = QGroupBox("Apply a saved model to this flight"); f3 = QFormLayout(g3)
         row = QHBoxLayout(); self.ed_model = QLineEdit(); b = QPushButton("Browse..."); b.clicked.connect(lambda: self._pick(self.ed_model, "joblib (*.joblib)")); row.addWidget(self.ed_model); row.addWidget(b); f3.addRow("Model:", row)
         self.sp_off = QDoubleSpinBox(); self.sp_off.setRange(-1e6, 1e6); self.sp_off.setDecimals(1); self.btn_apply = QPushButton("Predict every plot"); self.btn_apply.clicked.connect(self._apply)
         row = QHBoxLayout(); row.addWidget(self.sp_off); row.addWidget(self.btn_apply); row.addStretch(); f3.addRow("Offset (target units):", row)
+        from phenoapp.core.ensembles import FOLD_CHOICES
+        self.cb_folds = QComboBox(); self.cb_folds.addItems([FOLD_CHOICES["all"], FOLD_CHOICES["best3"]])
+        self.cb_folds.setToolTip("Only for *_fold_ensembles.joblib files (one top-three ensemble per cross-validation fold). 'All fold models' averages the 10 "
+                                 "fold ensembles; 'best three folds' averages the three with the lowest test RMSE. Ranking folds by their test score selects "
+                                 "on the test sets, so quote accuracy from the all-folds cross-validation. For the final ensembles (*_top3_ensemble.joblib, "
+                                 "fitted on all plots) and single models this setting is ignored.")
+        f3.addRow("Fold models:", self.cb_folds)
         v.addWidget(g3)
         self.progress = QProgressBar(); self.progress.setTextVisible(True); v.addWidget(self.progress)
         self.out = QTextEdit(); self.out.setReadOnly(True); self.out.setFontFamily("Consolas"); v.addWidget(self.out, stretch=1)
@@ -173,6 +194,7 @@ class BiomassMLTab(QWidget):
         cv = ("rkf10", "loo", "none")[self.cb_cv.currentIndex()]
         self.btn.setEnabled(False); self.progress.setValue(0)
         self._w = _Worker(m, self.ed_vnir.text().strip(), g, self.ed_target.text().strip() or "biomass_kg_ha", fams, lrn, cv, self.sp_sel.value(), self.ed_spectra.text().strip())
+        self._w.plot_rule = ("all", "A", "B")[self.cb_plots.currentIndex()]
         self._w.progress.connect(lambda p, s: (self.progress.setValue(p), self.progress.setFormat(f"{p}% - {s}")))
         self._w.done_ok.connect(lambda t: (self.btn.setEnabled(True), self.out.setPlainText(t)))
         self._w.error.connect(lambda e: (self.btn.setEnabled(True), self.out.append("\nERROR: " + e), QMessageBox.critical(self, "Failed", e.split("\n")[0])))
@@ -183,12 +205,16 @@ class BiomassMLTab(QWidget):
         if not (m and os.path.exists(m) and p and os.path.exists(p)): QMessageBox.warning(self, "Missing input", "Pick the metrics CSV and a saved model."); return
         try:
             import pandas as pd
-            from phenoapp.core.ensembles import describe
+            from phenoapp.core.ensembles import describe, fold_table, is_fold_ensembles
             df, _ = _load_inputs(m, self.ed_vnir.text().strip()); saved = load_model(p)
+            folds = ("all", "best3")[self.cb_folds.currentIndex()] if is_fold_ensembles(saved) else "all"
             sp = _spectra_path(self.ed_vnir.text().strip(), self.ed_spectra.text().strip())
-            out = apply_model(df, saved, float(self.sp_off.value()), spectra=pd.read_csv(sp) if sp else None)
-            tgt = saved.get("meta", {}).get("target", saved.get("target", "target")); outp = os.path.splitext(m)[0] + f"_{tgt}_applied_{os.path.splitext(os.path.basename(p))[0].split('_ml_model_')[-1]}.csv"
+            out = apply_model(df, saved, float(self.sp_off.value()), spectra=pd.read_csv(sp) if sp else None, folds=folds)
+            tgt = saved.get("meta", {}).get("target", saved.get("target", "target")); stem = os.path.splitext(os.path.basename(p))[0].split('_ml_model_')[-1]
+            outp = os.path.splitext(m)[0] + f"_{tgt}_applied_{stem}" + (f"_{folds}" if is_fold_ensembles(saved) else "") + ".csv"
             out.to_csv(outp, index=False); v = out.predicted.dropna()
-            self.out.setPlainText(f"Applied {os.path.basename(p)} ({describe(saved)})\n{int(out.model_ok.sum())}/{len(out)} plots predicted; mean {v.mean():.4g}, SD {v.std():.4g}\n\nPredictions -> {outp}")
+            ft = fold_table(saved)
+            self.out.setPlainText(f"Applied {os.path.basename(p)} ({describe(saved, folds)})\n{int(out.model_ok.sum())}/{len(out)} plots predicted; mean {v.mean():.4g}, SD {v.std():.4g}\n\nPredictions -> {outp}"
+                                  + (("\n\nFold ensembles (test score of each fold; * = best three):\n" + ft.assign(best3=ft.best3.map({True: "*", False: ""})).to_string(index=False)) if ft is not None else ""))
         except Exception as e:
             import traceback; QMessageBox.critical(self, "Apply failed", f"{e}\n\n{traceback.format_exc()}")

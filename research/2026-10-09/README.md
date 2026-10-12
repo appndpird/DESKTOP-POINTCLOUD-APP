@@ -75,6 +75,21 @@ band families by a few kg/ha only. Network (all three variants, 10 folds each, i
 The blue bands (417-466 nm) are clipped on the anthesis flight (no plot has all of them valid) and cannot enter a model
 that pools both flights.
 
+## Reporting rule (12 Oct 2026) and valid-band plot runs
+
+Reported results (report section 3, `results\report_summary.csv`, `report_*_folds.csv`): height on the Muresk maturity
+flight only; biomass as ONE overall result pooled over all trials and stages, on the test set of each of the 10 folds and
+over all test plots, for features (nested top three per category) and the two-stream network (LiDAR only, VNIR only,
+two-stream), with the flights in each fold's test set listed (`report_testset_composition.csv`). Every individual feature
+model on the same folds: `report_each_model_summary.csv`, `report_each_model_folds.csv`.
+
+Valid-band plots only (report section 4, `valid_plot_results.py`, `results\valid_plots_*.csv`): models retrained on plots
+whose spectra have no band problem - rule A (every one of the 111 common bands unclipped on >= 50 % of the plot's pixels,
+reflectance cube, VNIR QC; 497 plot-flights: AGT anthesis 243, Muresk anthesis 128, Muresk maturity 126) and rule B (>= 95 %
+of the pixels and the plot fully inside the cube; 209 plot-flights, Muresk only: anthesis 83, maturity 126). Feature models:
+`nested_top3.py biomass --plots dataset\valid_plots_ruleX.csv --tag __ruleX`; network: `dl_twostream.py --plots ... --tag
+__ruleX --variants vnir_only,two_stream`. The same plot rule is available in PhenoApp v3.3.4 (Biomass ML tab, "Plots").
+
 ## Height ground truth: maturity flight only (rule adopted 10 Oct 2026)
 Muresk has a single ruler height per plot, measured at maturity (2025-11-21). Error metrics (R2, RMSE, ...) for height are
 therefore reported for the maturity flight only. The anthesis flight (2025-09-30) has no height measurement: its

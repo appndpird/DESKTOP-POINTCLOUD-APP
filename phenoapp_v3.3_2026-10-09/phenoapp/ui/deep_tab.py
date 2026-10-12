@@ -91,6 +91,11 @@ class DeepTab(QWidget):
                                     "new dataset(s), and the peak learning rate is lowered to 3e-4. Use it when the new trial has fewer than a few hundred labelled plots; "
                                     "untick to train from scratch. Band policy: the common 111-band list shipped with the ensemble.")
         f3.addRow("", self.cb_finetune)
+        self.cb_fsel = QComboBox(); self.cb_fsel.addItems(["all fold models (average of every fold model in the weights folder)", "best three folds (lowest test RMSE in fold_scores.csv) - optimistic scores"])
+        self.cb_fsel.setToolTip("Prediction only. The bundled ensembles hold the 10 fold models of each variant with their test scores (fold_scores.csv). "
+                                "'Best three folds' averages the three with the lowest test RMSE; because the folds are ranked on their test sets, quote "
+                                "accuracy from the all-folds cross-validation.")
+        f3.addRow("Fold models:", self.cb_fsel)
         row = QHBoxLayout(); self.btn_pred = QPushButton("Predict with pretrained ensemble"); self.btn_pred.clicked.connect(lambda: self._run("predict"))
         self.btn_train = QPushButton("Train / cross-validate on this trial"); self.btn_train.clicked.connect(lambda: self._run("train")); row.addWidget(self.btn_pred); row.addWidget(self.btn_train); row.addStretch(); f3.addRow("", row)
         v.addWidget(g3)
@@ -147,7 +152,8 @@ class DeepTab(QWidget):
         self.btn_pred.setEnabled(False); self.btn_train.setEnabled(False); self.out.append(f"\n=== {mode}: target {target}, variant {variant}, device {device}")
         wdir = self.ed_weights.text().strip() or None
         self._rn = _Run(exe, mode, data, out, target=target, device=device, variant=variant, weights=wdir, epochs=self.sp_epochs.value(), folds=self.sp_folds.value(),
-                        init=(wdir or pretrained_weights_dir()) if (mode == "train" and self.cb_finetune.isChecked()) else None)
+                        init=(wdir or pretrained_weights_dir()) if (mode == "train" and self.cb_finetune.isChecked()) else None,
+                        folds_select=("all", "best3")[self.cb_fsel.currentIndex()])
         self._rn.line.connect(self.out.append)
         self._rn.done_ok.connect(lambda rc: (self.btn_pred.setEnabled(True), self.btn_train.setEnabled(True), self.out.append(f"finished (exit code {rc}) -> {out}")))
         self._rn.start()

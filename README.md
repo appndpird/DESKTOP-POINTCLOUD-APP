@@ -1,9 +1,9 @@
 # Plant Phenotyping from Point Clouds
 
-**Current version: PhenoApp v3.3.3 (2026-10-12)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
-**Windows executable:** GitHub Releases, tag `v3.3.3`, asset `PhenoApp_v3.3.3_win64.zip` (unzip and run
+**Current version: PhenoApp v3.3.4 (2026-10-12)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
+**Windows executable:** GitHub Releases, tag `v3.3.4`, asset `PhenoApp_v3.3.4_win64.zip` (unzip and run
 `PhenoApp_v3\PhenoApp_v3.exe`; no Python needed except for the Deep Models tab, which uses an external torch environment).
-The same release carries `PhenoApp_v3.3.3_twostream_weights.zip` (all fold models of the final network runs).
+The same release carries `PhenoApp_v3.3.4_twostream_weights.zip` (all fold models of the final network runs).
 Build it yourself with `phenoapp_v3.3_2026-10-09/build_windows.bat` (PyInstaller, `phenoapp.spec`; torch is excluded on purpose).
 Saved models: `research/2026-10-09/models/` (feature models, the top-three ensembles per category for height and biomass,
 the Muresk pooled models, earlier two-stream folds); results to quote: `research/2026-10-09/README.md`, section "Final results".
