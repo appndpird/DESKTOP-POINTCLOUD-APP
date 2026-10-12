@@ -29,7 +29,13 @@ except Exception: lgb = None
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pca_families import pca_preprocessor, spectra_matrix, SB_PREFIX
 B = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment"; ROOT = os.path.join(B, "Biomass_Height_2026-10-09"); DS = os.path.join(ROOT, "dataset")
-TARGETS = sys.argv[1:] or ["height", "biomass"]
+def _opt(name):
+    """value of --name <value> on the command line (None when absent)"""
+    return sys.argv[sys.argv.index(name) + 1] if name in sys.argv and sys.argv.index(name) + 1 < len(sys.argv) else None
+PLOTS = _opt("--plots"); RUNTAG = _opt("--tag") or ""          # restrict to a plot list (dataset, Plot_ID) and suffix every output
+_skip = {PLOTS, RUNTAG} - {None, ""}
+TARGETS = [a for a in sys.argv[1:] if not a.startswith("--") and a not in _skip] or ["height", "biomass"]
+PLOTLIST = pd.read_csv(PLOTS)[["dataset", "Plot_ID"]] if PLOTS else None
 t0 = time.time()
 def log(*a): print(f"[{time.time()-t0:6.0f}s] " + " ".join(str(x) for x in a), flush=True)
 
@@ -78,22 +84,44 @@ def top3(sc, fams):
     """three best (family, learner) combinations within a category"""
     return sorted([(k, v) for k, v in sc.items() if k[0] in fams], key=lambda kv: kv[1])[:3]
 
+EACH = "--each" in sys.argv          # score every individual model on the reporting folds instead of the nested selection
+if EACH: TARGETS = [t for t in TARGETS if not t.startswith("--")] or ["height", "biomass"]
+
+def each_model(target, ds, d, cands, cats, ycol, out_res):
+    """held-out predictions of every (family, learner) on the same outer folds as the nested run (KFold(10, seed 0))"""
+    y = d[ycol].to_numpy(float); fold = np.zeros(len(y), int); outer = list(KFold(10, shuffle=True, random_state=0).split(y))
+    for k, (_, te) in enumerate(outer, 1): fold[te] = k
+    cat_of = {f: c for c, fs in cats.items() for f in fs}; rows = []
+    for c in cands:
+        X = d[c.cols].to_numpy(float)
+        for ln, model in c.learners().items():
+            p = np.zeros(len(y)); t1 = time.time()
+            for tr, te in outer:
+                m, idx = c.fit(model, X[tr], y[tr]); p[te] = np.asarray(m.predict(X[te][:, idx])).ravel()
+            rows.append(pd.DataFrame(dict(target=target, dataset=ds, category=cat_of.get(c.name, "?"), family=c.name, learner=ln, Plot_ID=d.Plot_ID, fold=fold, measured=y, predicted=p)))
+            log(f"{target} {ds} {c.name}/{ln}: RMSE {np.sqrt(((p - y) ** 2).mean()):.1f} ({time.time()-t1:.0f}s)")
+    pd.concat(rows, ignore_index=True).to_csv(os.path.join(out_res, f"fold_each_model_{ds}{RUNTAG}.csv"), index=False)
+    return []
+
 def run(target, ds, d, cands, cats, ycol, out_res, out_mod, meta):
+    if EACH: return each_model(target, ds, d, cands, cats, ycol, out_res)
     """cats: {category: [families]} - top three (family x learner) per category, chosen in the inner loop"""
     cats = {k: [f for f in v if any(c.name == f for c in cands)] for k, v in cats.items()}; cats = {k: v for k, v in cats.items() if v}
     y = d[ycol].to_numpy(float); Xs = {c.name: d[c.cols].to_numpy(float) for c in cands}; get = {c.name: c for c in cands}
-    rows = []; pred = {k: np.zeros(len(y)) for k in cats}; outer = list(KFold(10, shuffle=True, random_state=0).split(y))
+    rows = []; pred = {k: np.zeros(len(y)) for k in cats}; outer = list(KFold(10, shuffle=True, random_state=0).split(y)); fold_models = {}
     for f, (tr, te) in enumerate(outer):
         sc = inner_scores(cands, {k: v[tr] for k, v in Xs.items()}, y[tr], list(KFold(5, shuffle=True, random_state=f).split(tr)))
         for cat, fams in cats.items():
-            top = top3(sc, fams); ps = []
+            top = top3(sc, fams); ps = []; fmembers = []
             for (fam, ln), r in top:
                 c = get[fam]; m, idx = c.fit(c.learners()[ln], Xs[fam][tr], y[tr]); ps.append(np.asarray(m.predict(Xs[fam][te][:, idx])).ravel())
+                fmembers.append(dict(family=fam, learner=ln, inner_rmse=r, model=m, features=[c.cols[i] for i in idx]))
             pred[cat][te] = np.mean(ps, 0)
             rows.append(dict(target=target, dataset=ds, category=cat, outer_fold=f + 1, n_test=len(te), top3=" | ".join(f"{fam}/{ln} ({r:.1f})" for (fam, ln), r in top), **metrics(pred[cat][te], y[te])))
+            fold_models.setdefault(cat, []).append(dict(fold=f + 1, n_train=len(tr), n_test=len(te), test=metrics(pred[cat][te], y[te]), members=fmembers))
         log(f"{target} {ds} fold {f+1}/10 done: " + "; ".join(f"{r['category']} {r['top3']}" for r in rows[-len(cats):]))
-    pd.DataFrame(rows).to_csv(os.path.join(out_res, f"nested_top3_{ds}.csv"), index=False)
-    pd.DataFrame(dict(Plot_ID=d.Plot_ID, measured=y, **{f"pred_{k}": v for k, v in pred.items()})).to_csv(os.path.join(out_res, f"nested_top3_predictions_{ds}.csv"), index=False)
+    pd.DataFrame(rows).to_csv(os.path.join(out_res, f"nested_top3_{ds}{RUNTAG}.csv"), index=False)
+    pd.DataFrame(dict(Plot_ID=d.Plot_ID, measured=y, **{f"pred_{k}": v for k, v in pred.items()})).to_csv(os.path.join(out_res, f"nested_top3_predictions_{ds}{RUNTAG}.csv"), index=False)
     # final ensembles on all plots
     sc = inner_scores(cands, Xs, y, list(RepeatedKFold(n_splits=5, n_repeats=2, random_state=0).split(y)))
     out = []
@@ -103,9 +131,14 @@ def run(target, ds, d, cands, cats, ycol, out_res, out_mod, meta):
         for (fam, ln), r in top3(sc, fams):
             c = get[fam]; mod, idx = c.fit(c.learners()[ln], Xs[fam], y)
             members.append(dict(family=fam, learner=ln, inner_rmse=r, model=mod, features=[c.cols[i] for i in idx]))
-        fn = f"{target}_{ds}_{cat}_top3_ensemble.joblib"
+        fn = f"{target}_{ds}_{cat}_top3_ensemble{RUNTAG}.joblib"
         joblib.dump(dict(type="mean_ensemble", target=ycol, dataset=ds, category=cat, members=members, nested_cv=m, outer_fold_choices=freq, **meta), os.path.join(out_mod, fn))
         log(f"{target} {ds} {cat}: NESTED top-3 R2 {m['R2']:.3f} RMSE {m['RMSE']:.1f} | saved {fn}: {[(x['family'], x['learner']) for x in members]}")
+        ffn = f"{target}_{ds}_{cat}_fold_ensembles{RUNTAG}.joblib"      # the 10 outer-fold ensembles (each fitted on its training plots) + their test scores
+        joblib.dump(dict(type="fold_ensembles", target=ycol, dataset=ds, category=cat, folds=fold_models[cat], nested_cv=m,
+                         note="fold k = top-three ensemble chosen and fitted on the training plots of outer fold k; 'test' = its score on fold k's test plots. "
+                              "Ranking folds by these scores and keeping the best ones selects on the test sets, so the scores of a best-folds ensemble are optimistic.", **meta),
+                    os.path.join(out_mod, ffn))
         out.append(dict(target=target, dataset=ds, category=cat, n=len(y), **m, final_members=" | ".join(f"{x['family']}/{x['learner']}" for x in members), outer_fold_choices=json.dumps(freq), model_file=fn))
     return out
 
@@ -132,13 +165,16 @@ if "height" in TARGETS:
     summary += run("height", "muresk_maturity", d, cands, HCATS, "height_cm", RES, MOD,
                        dict(input_prep="research height_models.py: H*, cth_*, tip_thin, roughness, Hall*, profile_area* columns m -> cm; VNIR NaN -> flight median; bands = spectra_matrix(vnir_spectra.csv)",
                             flight="2025-11-21 (ruler at maturity)"))
-    pd.DataFrame([s for s in summary if s["target"] == "height"]).to_csv(os.path.join(RES, "nested_top3_summary.csv"), index=False)
+    if not EACH: pd.DataFrame([s for s in summary if s["target"] == "height"]).to_csv(os.path.join(RES, f"nested_top3_summary{RUNTAG}.csv"), index=False)
 if "biomass" in TARGETS:
     RES = os.path.join(ROOT, "biomass", "results"); MOD = os.path.join(ROOT, "biomass", "models"); FS = json.load(open(os.path.join(RES, "feature_sets.json")))
     def available(cols, d): return [c for c in cols if c in d.columns and np.isfinite(d[c].astype(float)).mean() > 0.95 and d[c].astype(float).std() > 0]
     bsum = []
     for ds in ("muresk_anthesis", "muresk_maturity", "agt_anthesis", "agt_maturity"):
         d = pd.read_csv(os.path.join(ROOT, "biomass", "features", f"features_{ds}.csv"))
+        if PLOTLIST is not None:
+            d = d.merge(PLOTLIST[PLOTLIST.dataset == ds][["Plot_ID"]], on="Plot_ID").reset_index(drop=True)
+            if len(d) < 20: log(f"biomass {ds}: {len(d)} plots in {os.path.basename(PLOTS)} - skipped"); continue
         has_vnir = (d.vnir_qc_ok.fillna(0) == 1).sum() >= 20
         if has_vnir: d = d[d.vnir_qc_ok.fillna(0) == 1].reset_index(drop=True)
         W = FS["WEIGHTED"] if isinstance(FS["WEIGHTED"], list) else list(FS["WEIGHTED"])
@@ -158,5 +194,5 @@ if "biomass" in TARGETS:
         log(f"biomass {ds}: {len(d)} plots, {len(cands)} candidate families")
         BCATS = {"lidar": ["LiDAR_core", "LiDAR_PCA"], "vnir": ["VNIR_core", "VNIR_PCA", "VNIR_bands_PCA"], "fused": ["Fused_core", "Fused_all", "Fused_PCA", "Fused_PCA_joint", "Fused_bands_PCA"]}
         bsum += run("biomass", ds, d, cands, BCATS, "biomass_kg_ha", RES, MOD, dict(input_prep="biomass\\features\\features_<dataset>.csv columns as stored (NaN -> dataset median)"))
-        pd.DataFrame(bsum).to_csv(os.path.join(RES, "nested_top3_summary.csv"), index=False)
+        if not EACH: pd.DataFrame(bsum).to_csv(os.path.join(RES, f"nested_top3_summary{RUNTAG}.csv"), index=False)
 log("NESTED TOP-3 DONE")

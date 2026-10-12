@@ -36,6 +36,7 @@ ap.add_argument("--no-group-by-plot", dest="group_by_plot", action="store_false"
 ap.add_argument("--tag", default="", help="suffix appended to the output file names (e.g. _grouped)")
 ap.add_argument("--datasets", default=None, help="comma-separated dataset names to use (default: every dataset with the target); e.g. muresk_maturity for height, where only the maturity flight has a ruler measurement")
 ap.add_argument("--bands-csv", default=None, help="with --bands common: CSV with wavelength_nm and common_95 columns to use instead of dataset/vnir_common_bands.csv (e.g. the Muresk-only list)")
+ap.add_argument("--plots", default=None, help="CSV with dataset, Plot_ID: train / validate on these plot-flights only (e.g. dataset/valid_plots_ruleB.csv)")
 args = ap.parse_args()
 TAG = {"per_plot": "", "common": "_commonbands", "per_plot_all": "_allbands"}[args.bands] + args.tag      # output files of each band policy sit side by side
 B = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment"
@@ -53,6 +54,9 @@ tcol = "biomass_kg_ha" if args.target == "biomass" else "height_cm"
 idx = idx[idx[tcol].notna()].reset_index(drop=True)
 if args.datasets:
     keep = [d.strip() for d in args.datasets.split(",")]; idx = idx[idx.dataset.isin(keep)].reset_index(drop=True); log(f"datasets restricted to {keep}")
+if args.plots:
+    pl = pd.read_csv(args.plots)[["dataset", "Plot_ID"]]; idx = idx.merge(pl, on=["dataset", "Plot_ID"]).reset_index(drop=True)
+    log(f"plots restricted to {os.path.basename(args.plots)}: {len(idx)} plot-flights {idx.dataset.value_counts().to_dict()}")
 log(f"target {tcol}: {len(idx)} samples; per dataset {idx.dataset.value_counts().to_dict()}; plots with usable VNIR {int((idx.n_usable_bands > 0).sum())}")
 wl = np.load(os.path.join(DATA, idx.file[0]))["wavelengths"]
 EXCL = np.zeros(len(wl), bool)

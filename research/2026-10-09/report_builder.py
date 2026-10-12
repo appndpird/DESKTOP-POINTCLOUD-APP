@@ -170,9 +170,88 @@ for lab, folder in (("height", HP), ("biomass", BM)):
     pcf = os.path.join(folder, "results", "pca_components.csv")
     if os.path.exists(pcf):
         html += [f"<h3>Principal components kept per block ({lab} models, fitted on all plots for reference)</h3>", table_html(pd.read_csv(pcf), "{:.3f}")]
+# ------------------------------------------------------------ RESULTS TO REPORT (rule of 12 Oct 2026; pooled_fold_results.py)
+rsp = os.path.join(M, "results", "report_summary.csv")
+if os.path.exists(rsp):
+    RS = pd.read_csv(rsp); HF = pd.read_csv(os.path.join(M, "results", "report_height_folds.csv")); BF = pd.read_csv(os.path.join(M, "results", "report_biomass_pooled_folds.csv"))
+    def summ(df):
+        d = df.copy(); d["R2 (all test plots)"] = d.R2_overall.round(2); d["RMSE (all test plots)"] = d.RMSE_overall.round(1); d["rRMSE %"] = d.rRMSE_overall.round(1)
+        d["RMSE per fold, mean ± SD"] = d.RMSE_fold_mean.round(1).astype(str) + " ± " + d.RMSE_fold_sd.round(1).astype(str)
+        d["R² per fold, mean ± SD"] = d.R2_fold_mean.round(2).astype(str) + " ± " + d.R2_fold_sd.round(2).astype(str)
+        return d[["target", "category", "approach", "plots", "test_plots_per_fold", "R2 (all test plots)", "RMSE (all test plots)", "rRMSE %", "RMSE per fold, mean ± SD", "R² per fold, mean ± SD"]]
+    def per_fold(df):
+        d = df[df.fold.astype(str) != "all"].copy(); d["fold"] = d.fold.astype(int); d["cell"] = d.R2.round(2).astype(str) + " / " + d.RMSE.round(1).astype(str)
+        return d.pivot_table(index=["target", "category", "approach"], columns="fold", values="cell", aggfunc="first").reset_index()
+    html += ["<h2>3. Results to report (overall; height on Muresk maturity)</h2>",
+             "<div class='note'><b>Reporting rules.</b> Height: Muresk maturity flight only, the only flight with a ruler measurement. Biomass: one overall result pooled over all trials and stages, "
+             "computed on the test set of each of the 10 folds (every plot is in the test set of exactly one fold; folds grouped by plot) and over all test plots together. "
+             "Feature models = the average of the top three models of the category, chosen inside each training fold (nested). Deep learning = the two-stream network, variant LiDAR only / VNIR only / two-stream. "
+             "LiDAR only, VNIR only and fused are compared on the same plots: the 506 plot-flights with usable VNIR (Muresk anthesis and maturity, AGT anthesis; AGT maturity has radiance cubes); "
+             "the LiDAR-only result over all 758 plot-flights is given in addition. Pooled R² mixes trials and stages with different mean biomass and is therefore higher on the 758 plots than on the 506; "
+             "compare categories within the same row group, and use RMSE / rRMSE across groups. "
+             "The overall results use exactly the same test plots for features and deep learning. Fold k holds the same number of plots of each flight for both approaches "
+             "(table 'Flights in the test set'), but not the same individual plots, because the feature models were cross-validated within each flight and the network across all flights; "
+             "fold-by-fold values are therefore compared within an approach, the overall values across approaches.</div>",
+             "<h3>Overall results (all test plots of the 10 folds together)</h3>", table_html(summ(RS)),
+             ("<h3>Flights in the test set (plots per flight in each fold's test set)</h3>" + table_html(pd.read_csv(os.path.join(M, "results", "report_testset_composition.csv")))) if os.path.exists(os.path.join(M, "results", "report_testset_composition.csv")) else "",
+             "<h3>Height, Muresk maturity: test set of each fold (R² / RMSE cm, 12-13 plots per fold)</h3>", table_html(per_fold(HF)),
+             "<h3>Biomass, pooled over all trials: test set of each fold (R² / RMSE kg/ha, about 51 plots per fold on the VNIR plots, 76 on all plots)</h3>", table_html(per_fold(BF))]
+    # fold models and the "best three folds" option (feature fold ensembles: nested_top3_<ds>.csv; network: fold_scores.csv of the bundled ensembles)
+    fm = []
+    for t in ("height", "biomass"):
+        for f in sorted(os.listdir(os.path.join(M, t, "results"))):
+            if f.startswith("nested_top3_") and f.endswith(".csv") and not f.startswith(("nested_top3_predictions", "nested_top3_summary")) and "__" not in f:
+                if t == "height" and "muresk_maturity" not in f: continue
+                q = pd.read_csv(os.path.join(M, t, "results", f))
+                fm.append(q.assign(approach="features (fold ensemble: top three chosen on the fold's training plots)", fold=q.outer_fold)[["target", "dataset", "category", "approach", "fold", "n_test", "R2", "RMSE"]])
+    fsp = r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06\phenoapp\assets\dl_models\fold_scores.csv"
+    if os.path.exists(fsp):
+        q = pd.read_csv(fsp); q["dataset"] = np.where(q.target == "height", "muresk_maturity", "all four datasets pooled")
+        fm.append(q.assign(category=q.variant.map({"lidar_only": "lidar", "vnir_only": "vnir", "two_stream": "fused"}), approach="deep learning (fold model)")[["target", "dataset", "category", "approach", "fold", "n_test", "R2", "RMSE"]])
+    if fm:
+        FM = pd.concat(fm, ignore_index=True); FM["fold"] = FM.fold.astype(int)
+        FM["best3"] = FM.groupby(["target", "dataset", "category", "approach"]).RMSE.rank(method="first") <= 3
+        FM["cell"] = FM.RMSE.round(1).astype(str) + np.where(FM.best3, " *", "")
+        fpv = FM.pivot_table(index=["target", "dataset", "category", "approach"], columns="fold", values="cell", aggfunc="first").reset_index()
+        html += ["<h3>Fold models and the 'best three folds' option</h3>",
+                 "<p>Every fold has its own model: for the feature models, the top-three ensemble chosen and fitted on that fold's training plots (per flight); for the network, the fold model. "
+                 "Values are the test RMSE of each fold model on its own test plots; <b>*</b> marks the three best folds of each case. The app (Height Models / Biomass ML: *_fold_ensembles.joblib; "
+                 "Deep Models: fold_scores.csv) predicts with all fold models (default) or with the best three. Ranking folds by their test score selects on the test sets, so the best three look "
+                 "better than they are; their scores are not an independent accuracy estimate, and the accuracy to quote remains the all-folds result above.</p>",
+                 table_html(fpv)]
+    emp = os.path.join(M, "results", "report_each_model_folds.csv")
+    if os.path.exists(emp):
+        EMF = pd.read_csv(emp); EMS = pd.read_csv(os.path.join(M, "results", "report_each_model_summary.csv"))
+        EMS["RMSE per fold, mean ± SD"] = EMS.RMSE_fold_mean.round(1).astype(str) + " ± " + EMS.RMSE_fold_sd.round(1).astype(str)
+        d_ = EMF[EMF.fold.astype(str) != "all"].copy(); d_["fold"] = d_.fold.astype(int); d_["cell"] = d_.R2.round(2).astype(str) + " / " + d_.RMSE.round(1).astype(str)
+        pv = d_.pivot_table(index=["target", "category", "family", "learner"], columns="fold", values="cell", aggfunc="first").reset_index()
+        html += ["<h3>Every individual feature model on the same test folds</h3>",
+                 "<p>Each feature family x learner scored on the same 10 test folds as the tables above (no selection involved, so these are the components the top-three ensembles choose from). "
+                 "Sorted by RMSE within each target and category. The network variants are the deep-learning rows of the tables above.</p>",
+                 table_html(EMS[["target", "category", "family", "learner", "n", "R2", "RMSE", "rRMSE", "RMSE per fold, mean ± SD"]].round(3)),
+                 "<h4>Per fold (R² / RMSE)</h4>", table_html(pv)]
+# ------------------------------------------------------------ VALID-BAND PLOTS ONLY (rule A / rule B; valid_plot_results.py)
+vps = os.path.join(M, "results", "valid_plots_summary.csv")
+if os.path.exists(vps):
+    VS = pd.read_csv(vps); VF = pd.read_csv(os.path.join(M, "results", "valid_plots_folds.csv"))
+    VS["RMSE per fold, mean ± SD"] = VS.RMSE_fold_mean.round(1).astype(str) + " ± " + VS.RMSE_fold_sd.round(1).astype(str)
+    vf_ = VF[VF.fold.astype(str) != "all"].copy(); vf_["fold"] = vf_.fold.astype(int); vf_["cell"] = vf_.R2.round(2).astype(str) + " / " + vf_.RMSE.round(1).astype(str)
+    vpv = vf_.pivot_table(index=["rule", "category", "approach"], columns="fold", values="cell", aggfunc="first").reset_index()
+    vcp = os.path.join(M, "results", "valid_plots_composition.csv")
+    html += ["<h2>4. Biomass on valid-band plots only (rule A and rule B)</h2>",
+             "<div class='note'><b>Plot selection.</b> Only plots whose spectra have no band problem enter these runs. "
+             "<b>Rule A:</b> every one of the 111 common bands valid (not clipped) on at least 50 % of the plot's pixels, reflectance cube, VNIR QC passed: 497 plot-flights "
+             "(AGT anthesis 243, Muresk anthesis 128, Muresk maturity 126). <b>Rule B:</b> every common band valid on at least 95 % of the plot's pixels and the plot entirely inside the cube: "
+             "209 plot-flights, Muresk only (anthesis 83, maturity 126); no AGT plot qualifies (red bands partly clipped at anthesis, radiance cubes at maturity). "
+             "Models were trained and tested on these plots only: feature models = top three per category by nested selection, per flight; network = VNIR-only and two-stream variants on the same plots, folds grouped by plot. "
+             "Overall results pooled over the flights of the rule, on the test set of each of the 10 folds; features and network on the same plots. LiDAR only (features) is shown as the reference. "
+             "Plot lists: dataset\\valid_plots_ruleA.csv, valid_plots_ruleB.csv; saved ensembles: biomass\\models\\*_top3_ensemble__ruleA/B.joblib.</div>",
+             "<h3>Overall results</h3>", table_html(VS[["rule", "category", "approach", "plots", "flights", "R2_overall", "RMSE_overall", "rRMSE_overall", "RMSE per fold, mean ± SD"]].round(3)),
+             ("<h3>Flights in the test set (plots per flight in each fold)</h3>" + table_html(pd.read_csv(vcp))) if os.path.exists(vcp) else "",
+             "<h3>Test set of each fold (R² / RMSE kg/ha)</h3>", table_html(vpv)]
 if H is not None:
     hs = HA["ruler_maturity_minus_predicted_anthesis_cm"] if HA else None; hc = HA["cth_p95_maturity_minus_anthesis_cm"] if HA else None; hp_ = HA["predicted_anthesis_height_cm"] if HA else None
-    html += ["<h2>3. Plant height (Muresk, maturity flight 2025-11-21; ground truth = ruler at maturity, n = 128)</h2>",
+    html += ["<h2>Appendix A. Plant height, Muresk maturity flight: model development detail (ground truth = ruler at maturity, n = 128)</h2>",
              "<div class='note'><b>What is validated and what is predicted.</b> Muresk has one ruler height per plot, measured at maturity, so RMSE, R² and the other error metrics are reported for the maturity flight only. "
              "The anthesis flight (2025-09-30) has no height measurement; its height is <i>predicted</i> with the maturity-flight model and reported below as a predicted height with the difference to the maturity ruler, not as an error score. The AGT trial has no height ground truth.</div>",
              img("h_bar"), "<h3>Best model per feature family (held-out predictions, repeated 10-fold, maturity flight)</h3>", table_html(H),
@@ -186,7 +265,7 @@ if H is not None:
 else:
     html += ["<h2>3. Plant height</h2><p>not run</p>"]
 if Bt is not None:
-    html += ["<h2>4. Above-ground biomass (kg/ha, dry)</h2>", img("b_bar"), "<h3>Best model per feature family and dataset (repeated 10-fold)</h3>", table_html(Bt),
+    html += ["<h2>Appendix B. Above-ground biomass per trial and flight: development detail (not the reported results)</h2>", img("b_bar"), "<h3>Best model per feature family and dataset (repeated 10-fold)</h3>", table_html(Bt),
              ("<p class='small'>Families not run: " + "; ".join(f"{r.dataset} {r.feature_set} ({r.reason})" for _, r in skipped.iterrows()) + "</p>") if skipped is not None and len(skipped) else "",
              "".join(img(f"b_{ds}") for ds in DSETS), "<h3>Top features (random-forest importance on all features, per dataset)</h3>", img("b_imp"),
              "<h3>Pooled model across trials and stages (grouped 10-fold), R² per dataset</h3>", table_html(pooled.reset_index()),
@@ -211,7 +290,7 @@ for t in ("height", "biomass"):
 if NT:
     NT = pd.concat(NT, ignore_index=True)
     piv = NT.assign(cell=NT.R2.round(2).astype(str) + " / " + NT.RMSE.round(1).astype(str)).pivot_table(index=["target", "dataset"], columns="category", values="cell", aggfunc="first").reindex(columns=["lidar", "vnir", "fused"]).fillna("-")
-    html += ["<h2>4b. Reporting models: top three per category (LiDAR only, VNIR only, fused), nested selection</h2>",
+    html += ["<h2>Appendix C. Top three per category per trial and flight (nested selection); saved ensembles</h2>",
              "<div class='note'><b>How these numbers are made.</b> Outer 10-fold cross-validation; inside each outer training set a 5-fold inner loop scores every feature family x learner, "
              "and the three best combinations of each category are fitted on the outer training plots and averaged on the outer test plots. The choice of the three never sees the plots it is scored on, "
              "so these are the honest scores of the procedure 'take the top three of the category and average them', to be quoted in reports. The same selection on all plots gives the saved ensembles "
@@ -219,7 +298,7 @@ if NT:
              "Height: maturity flight only (ruler at maturity). AGT maturity: LiDAR only (radiance cubes).</div>",
              "<h3>R² / RMSE (kg/ha for biomass, cm for height)</h3>", table_html(piv.reset_index()),
              "<h3>Members of the saved ensembles</h3>", table_html(NT[["target", "dataset", "category", "n", "R2", "RMSE", "final_members", "model_file"]].round(3))]
-html += ["<h2>5. Two-stream deep network (sparse 3D CNN on the classified plot cloud + spectral transformer on VNIR pixels, late fusion)</h2>",
+html += ["<h2>Appendix D. Two-stream deep network per trial and flight (sparse 3D CNN + spectral transformer, late fusion): runs and band policies</h2>",
          "<p>Inputs from the same dataset; the spectral stream never sees an unusable band (per-plot band mask from the NaN rule, clipped pixels and excluded ranges are masked and the availability mask is given to the network). 10-fold CV stratified by dataset, 100 epochs per fold (AdamW, OneCycle schedule, log-biomass target). "
          "Training-time data augmentation, applied on the fly to every training plot: point cloud randomly rotated by 180° and mirrored across the row axis, 0-30 % of the points dropped at random, 1 cm xy jitter; spectral pixels bootstrap-resampled within the plot and scaled by a random brightness factor of 0.9-1.1. "
          "Nothing is augmented at test time, and the feature-based models use no augmentation (their regularisation is the nested selection, PCA and the ridge / PLS penalties). The pooled R² is inflated by the between-dataset differences in mean biomass; the per-dataset rows are the comparable numbers.</p>",
@@ -235,7 +314,7 @@ html += ["<h2>5. Two-stream deep network (sparse 3D CNN on the classified plot c
           "(522-645, 691-754, 772-926, 965-1000 nm; dataset\\vnir_common_bands.csv) are the spectral input of every plot, so no flight is represented by a different band set and the network cannot use band availability as a trial fingerprint. "
           "Blue and the red absorption well are dropped for all plots; clipped pixels are still ignored; the radiance flight stays LiDAR-only. Per-plot run above = most data per plot; common-band run = identical inputs across flights.</p>"
           + table_html(DLCB) + (("<h4>Height, common bands (maturity flight; ungrouped folds - superseded by the grouped rerun above)</h4>" + table_html(DLHCB)) if DLHCB is not None else "")) if DLCB is not None else "",
-         "<h2>6. Files</h2><p class='small'>Everything is under Biomass Experiment\\Biomass_Height_2026-10-09: dataset\\ (per trial / flight: ground_truth.csv, features_lidar.csv, features_vnir.csv, vnir_spectra.csv, vnir_band_usable.csv, features_all.csv, lidar_classified\\, vnir\\), "
+         "<h2>Files</h2><p class='small'>Everything is under Biomass Experiment\\Biomass_Height_2026-10-09: dataset\\ (per trial / flight: ground_truth.csv, features_lidar.csv, features_vnir.csv, vnir_spectra.csv, vnir_band_usable.csv, features_all.csv, lidar_classified\\, vnir\\), "
          "height\\ and biomass\\ (results\\, models\\), two_stream\\ (dl_data\\, results\\, models\\), figures\\, scripts\\ (build_dataset.py, dl_prepare.py, height_models.py, biomass_models.py, pca_families.py, dl_twostream.py, report_builder.py, grid_pyshp.py, vnir_envi.py) and README.md.</p>"]
 page = "\n".join(html)
 out = os.path.join(M, "REPORT_height_biomass_2026-10-09.html"); open(out, "w", encoding="utf-8").write(page)
