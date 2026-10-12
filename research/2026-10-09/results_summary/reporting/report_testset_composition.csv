@@ -1,12 +1,12 @@
 test set,flight,1,2,3,4,5,6,7,8,9,10,all folds
 "height, Muresk maturity",Muresk 2025-11-21 (maturity),13,13,13,13,13,13,12,12,13,13,128
 "height, Muresk maturity",total,13,13,13,13,13,13,12,12,13,13,128
-"biomass, pooled, plots with usable VNIR (3 datasets)",AGT 2025-09-22 (anthesis),26,26,25,25,25,25,25,25,25,25,252
-"biomass, pooled, plots with usable VNIR (3 datasets)",Muresk 2025-09-30 (anthesis),12,12,13,13,13,13,13,13,13,13,128
-"biomass, pooled, plots with usable VNIR (3 datasets)",Muresk 2025-11-21 (maturity),12,12,12,13,13,13,13,12,13,13,126
-"biomass, pooled, plots with usable VNIR (3 datasets)",total,50,50,50,51,51,51,51,50,51,51,506
-"biomass, pooled, all plots (4 datasets)",AGT 2025-09-22 (anthesis),26,26,25,25,25,25,25,25,25,25,252
-"biomass, pooled, all plots (4 datasets)","AGT 2025-11-13 (maturity, flights 1+2 merged)",26,26,25,25,25,25,25,25,25,25,252
-"biomass, pooled, all plots (4 datasets)",Muresk 2025-09-30 (anthesis),12,12,13,13,13,13,13,13,13,13,128
-"biomass, pooled, all plots (4 datasets)",Muresk 2025-11-21 (maturity),12,12,13,13,13,13,13,13,13,13,128
+"biomass, pooled, plots with usable VNIR (3 datasets)",AGT 2025-09-22 (anthesis),25,25,25,26,25,25,25,25,26,25,252
+"biomass, pooled, plots with usable VNIR (3 datasets)",Muresk 2025-09-30 (anthesis),13,13,13,12,13,13,13,13,12,13,128
+"biomass, pooled, plots with usable VNIR (3 datasets)",Muresk 2025-11-21 (maturity),12,13,13,12,13,13,12,13,12,13,126
+"biomass, pooled, plots with usable VNIR (3 datasets)",total,50,51,51,50,51,51,50,51,50,51,506
+"biomass, pooled, all plots (4 datasets)",AGT 2025-09-22 (anthesis),25,25,25,26,25,25,25,25,26,25,252
+"biomass, pooled, all plots (4 datasets)","AGT 2025-11-13 (maturity, flights 1+2 merged)",25,25,25,26,25,25,25,25,26,25,252
+"biomass, pooled, all plots (4 datasets)",Muresk 2025-09-30 (anthesis),13,13,13,12,13,13,13,13,12,13,128
+"biomass, pooled, all plots (4 datasets)",Muresk 2025-11-21 (maturity),13,13,13,12,13,13,13,13,12,13,128
 "biomass, pooled, all plots (4 datasets)",total,76,76,76,76,76,76,76,76,76,76,760

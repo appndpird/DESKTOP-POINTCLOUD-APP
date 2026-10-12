@@ -1,7 +1,7 @@
 <title>Height and Biomass Models 2026-10-09</title><style>body{font-family:Segoe UI,Arial,sans-serif;max-width:1180px;margin:0 auto;padding:20px;color:#1b1b1b;line-height:1.45}h1{font-size:1.7rem}h2{margin-top:36px;border-bottom:2px solid #ddd;padding-bottom:4px}h3{margin-top:22px}
 table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-nums}th,td{padding:4px 8px;border-bottom:1px solid #e3e3e3;text-align:right}th:first-child,td:first-child,td:nth-child(2),th:nth-child(2){text-align:left}th{background:#f3f4f2;position:sticky;top:0}
 .tw{overflow-x:auto;margin:8px 0 16px}img{max-width:100%;height:auto;border:1px solid #e3e3e3;border-radius:6px;margin:6px 0}.note{background:#f6f8f5;border-left:4px solid #1f6f4a;padding:8px 14px;margin:12px 0}.warn{background:#fff4f2;border-left:4px solid #b3261e;padding:8px 14px;margin:12px 0}.small{color:#666;font-size:.85rem}</style><h1>Plant height and biomass models from GOBI LiDAR + VNIR — Muresk and AGT NUE trials 2025 (rebuild of 9 October 2026)</h1>
-<p class='small'>Built 2026-10-12 14:14 on Dataset_2026-10-09 with PhenoApp v3.3 (v3.2 LiDAR pipeline: gap noise rule, plot-local ground, canopy classification, interior gap metrics; v3.0.1 VNIR: NaN rule for unusable bands, flight-level reflectance check, red-clipping censoring). Validation: nested repeated 10-fold CV (feature selection inside each fold), LOOCV for the top height models, leave-one-flight-out and cross-trial transfer; the two-stream network uses 10-fold CV stratified by dataset.</p>
+<p class='small'>Built 2026-10-12 14:15 on Dataset_2026-10-09 with PhenoApp v3.3 (v3.2 LiDAR pipeline: gap noise rule, plot-local ground, canopy classification, interior gap metrics; v3.0.1 VNIR: NaN rule for unusable bands, flight-level reflectance check, red-clipping censoring). Validation: nested repeated 10-fold CV (feature selection inside each fold), LOOCV for the top height models, leave-one-flight-out and cross-trial transfer; the two-stream network uses 10-fold CV stratified by dataset.</p>
 <div class='warn'><b>Data limits carried into this rebuild.</b> AGT 2025-11-13 (maturity): both VNIR orthomosaics are at-sensor radiance, not reflectance, so every VNIR value is NaN and the dataset is modelled LiDAR-only. AGT 2025-09-22 (anthesis): the 670 nm band is clipped to zero on about half of the plot pixels; red-based indices are NaN on plots with red_ok = 0 and are dropped from the models when missing on more than 5 % of plots. Muresk: blue bands clipped (not used by the core features). The 'accuracy' column is 100 - MAPE and reflects the spread of the target, not model skill.</div>
 <h2>1. Dataset</h2>
 <div class='tw'><table class="dataframe">
@@ -564,8 +564,8 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>0.43</td>
       <td>3.80</td>
       <td>4.50</td>
-      <td>3.8 ± 0.8</td>
-      <td>0.34 ± 0.22</td>
+      <td>3.7 ± 0.9</td>
+      <td>0.33 ± 0.34</td>
     </tr>
     <tr>
       <td>height, Muresk maturity</td>
@@ -588,8 +588,8 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>-0.03</td>
       <td>5.20</td>
       <td>6.10</td>
-      <td>5.1 ± 1.0</td>
-      <td>-0.16 ± 0.16</td>
+      <td>5.1 ± 0.8</td>
+      <td>-0.17 ± 0.21</td>
     </tr>
     <tr>
       <td>height, Muresk maturity</td>
@@ -613,7 +613,7 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>4.00</td>
       <td>4.80</td>
       <td>4.0 ± 0.8</td>
-      <td>0.26 ± 0.24</td>
+      <td>0.26 ± 0.35</td>
     </tr>
     <tr>
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
@@ -636,8 +636,8 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>0.14</td>
       <td>1495.90</td>
       <td>15.90</td>
-      <td>1482.3 ± 205.2</td>
-      <td>0.13 ± 0.13</td>
+      <td>1491.0 ± 125.3</td>
+      <td>0.11 ± 0.19</td>
     </tr>
     <tr>
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
@@ -660,8 +660,8 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>-0.01</td>
       <td>1622.70</td>
       <td>17.30</td>
-      <td>1609.8 ± 204.3</td>
-      <td>-0.02 ± 0.02</td>
+      <td>1617.7 ± 134.9</td>
+      <td>-0.03 ± 0.03</td>
     </tr>
     <tr>
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
@@ -684,8 +684,8 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>0.14</td>
       <td>1500.30</td>
       <td>16.00</td>
-      <td>1491.1 ± 165.0</td>
-      <td>0.11 ± 0.12</td>
+      <td>1496.9 ± 106.7</td>
+      <td>0.1 ± 0.17</td>
     </tr>
     <tr>
       <td>biomass, pooled, all plots (4 datasets)</td>
@@ -708,8 +708,8 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>0.53</td>
       <td>1636.50</td>
       <td>15.50</td>
-      <td>1629.7 ± 155.4</td>
-      <td>0.53 ± 0.08</td>
+      <td>1631.8 ± 132.0</td>
+      <td>0.52 ± 0.1</td>
     </tr>
   </tbody>
 </table></div>
@@ -765,30 +765,30 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
     <tr>
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
       <td>AGT 2025-09-22 (anthesis)</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
       <td>26</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
       <td>26</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
       <td>25</td>
       <td>252</td>
     </tr>
     <tr>
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
       <td>Muresk 2025-09-30 (anthesis)</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
       <td>12</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
       <td>12</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
       <td>13</td>
       <td>128</td>
     </tr>
@@ -796,14 +796,14 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
       <td>Muresk 2025-11-21 (maturity)</td>
       <td>12</td>
-      <td>12</td>
-      <td>12</td>
-      <td>13</td>
-      <td>13</td>
       <td>13</td>
       <td>13</td>
       <td>12</td>
       <td>13</td>
+      <td>13</td>
+      <td>12</td>
+      <td>13</td>
+      <td>12</td>
       <td>13</td>
       <td>126</td>
     </tr>
@@ -811,74 +811,74 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
       <td>total</td>
       <td>50</td>
-      <td>50</td>
-      <td>50</td>
-      <td>51</td>
-      <td>51</td>
       <td>51</td>
       <td>51</td>
       <td>50</td>
       <td>51</td>
+      <td>51</td>
+      <td>50</td>
+      <td>51</td>
+      <td>50</td>
       <td>51</td>
       <td>506</td>
     </tr>
     <tr>
       <td>biomass, pooled, all plots (4 datasets)</td>
       <td>AGT 2025-09-22 (anthesis)</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
       <td>26</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
       <td>26</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
       <td>25</td>
       <td>252</td>
     </tr>
     <tr>
       <td>biomass, pooled, all plots (4 datasets)</td>
       <td>AGT 2025-11-13 (maturity, flights 1+2 merged)</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
       <td>26</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
+      <td>25</td>
       <td>26</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
-      <td>25</td>
       <td>25</td>
       <td>252</td>
     </tr>
     <tr>
       <td>biomass, pooled, all plots (4 datasets)</td>
       <td>Muresk 2025-09-30 (anthesis)</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
       <td>12</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
       <td>12</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
       <td>13</td>
       <td>128</td>
     </tr>
     <tr>
       <td>biomass, pooled, all plots (4 datasets)</td>
       <td>Muresk 2025-11-21 (maturity)</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
       <td>12</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
       <td>12</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
-      <td>13</td>
       <td>13</td>
       <td>128</td>
     </tr>
@@ -925,16 +925,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>height, Muresk maturity</td>
       <td>fused</td>
       <td>deep learning (two-stream net)</td>
-      <td>0.05 / 3.6</td>
+      <td>0.49 / 3.2</td>
+      <td>0.35 / 4.7</td>
+      <td>0.54 / 2.8</td>
+      <td>-0.0 / 5.5</td>
+      <td>-0.56 / 4.1</td>
+      <td>0.19 / 4.0</td>
+      <td>0.11 / 4.4</td>
+      <td>0.48 / 4.3</td>
       <td>0.59 / 3.4</td>
-      <td>0.5 / 3.9</td>
-      <td>0.27 / 3.7</td>
-      <td>0.23 / 5.2</td>
-      <td>0.27 / 3.2</td>
-      <td>-0.05 / 4.3</td>
-      <td>0.59 / 2.9</td>
-      <td>0.23 / 4.4</td>
-      <td>-0.04 / 5.1</td>
+      <td>0.39 / 3.3</td>
     </tr>
     <tr>
       <th></th>
@@ -957,16 +957,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>height, Muresk maturity</td>
       <td>lidar</td>
       <td>deep learning (two-stream net)</td>
-      <td>0.1 / 3.5</td>
-      <td>0.48 / 3.8</td>
-      <td>0.63 / 3.4</td>
-      <td>0.44 / 3.3</td>
-      <td>0.32 / 4.9</td>
-      <td>0.39 / 2.9</td>
-      <td>0.02 / 4.2</td>
-      <td>0.65 / 2.6</td>
-      <td>0.23 / 4.4</td>
-      <td>0.11 / 4.7</td>
+      <td>0.67 / 2.6</td>
+      <td>0.4 / 4.5</td>
+      <td>0.75 / 2.1</td>
+      <td>0.1 / 5.2</td>
+      <td>-0.32 / 3.8</td>
+      <td>0.03 / 4.4</td>
+      <td>0.11 / 4.4</td>
+      <td>0.57 / 3.9</td>
+      <td>0.62 / 3.3</td>
+      <td>0.42 / 3.2</td>
     </tr>
     <tr>
       <th></th>
@@ -989,16 +989,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>height, Muresk maturity</td>
       <td>vnir</td>
       <td>deep learning (two-stream net)</td>
-      <td>-0.06 / 3.8</td>
-      <td>-0.08 / 5.5</td>
-      <td>-0.06 / 5.7</td>
-      <td>-0.02 / 4.4</td>
-      <td>-0.48 / 7.2</td>
-      <td>-0.08 / 3.8</td>
-      <td>-0.42 / 5.0</td>
-      <td>-0.13 / 4.7</td>
-      <td>-0.1 / 5.3</td>
-      <td>-0.14 / 5.4</td>
+      <td>-0.04 / 4.6</td>
+      <td>-0.15 / 6.2</td>
+      <td>-0.47 / 5.0</td>
+      <td>-0.07 / 5.6</td>
+      <td>-0.61 / 4.2</td>
+      <td>-0.12 / 4.7</td>
+      <td>-0.06 / 4.8</td>
+      <td>-0.13 / 6.3</td>
+      <td>-0.0 / 5.3</td>
+      <td>-0.0 / 4.3</td>
     </tr>
     <tr>
       <th></th>
@@ -1044,16 +1044,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>biomass, pooled, all plots (4 datasets)</td>
       <td>lidar</td>
       <td>deep learning (two-stream net)</td>
-      <td>0.52 / 1677.8</td>
-      <td>0.67 / 1295.4</td>
-      <td>0.46 / 1556.9</td>
-      <td>0.53 / 1584.5</td>
-      <td>0.42 / 1837.6</td>
-      <td>0.63 / 1631.4</td>
-      <td>0.5 / 1750.4</td>
-      <td>0.5 / 1634.7</td>
-      <td>0.49 / 1798.1</td>
-      <td>0.57 / 1530.1</td>
+      <td>0.6 / 1516.4</td>
+      <td>0.42 / 1711.4</td>
+      <td>0.49 / 1739.8</td>
+      <td>0.57 / 1473.7</td>
+      <td>0.47 / 1513.1</td>
+      <td>0.65 / 1469.0</td>
+      <td>0.33 / 1844.9</td>
+      <td>0.5 / 1699.2</td>
+      <td>0.64 / 1730.8</td>
+      <td>0.54 / 1619.7</td>
     </tr>
     <tr>
       <th></th>
@@ -1076,16 +1076,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
       <td>fused</td>
       <td>deep learning (two-stream net)</td>
-      <td>0.09 / 1538.5</td>
-      <td>-0.12 / 1244.2</td>
-      <td>0.28 / 1229.8</td>
-      <td>0.14 / 1428.9</td>
-      <td>0.13 / 1627.5</td>
-      <td>0.13 / 1445.1</td>
-      <td>0.03 / 1714.6</td>
-      <td>0.02 / 1438.3</td>
-      <td>0.15 / 1652.3</td>
-      <td>0.26 / 1592.0</td>
+      <td>0.22 / 1268.2</td>
+      <td>0.08 / 1515.4</td>
+      <td>0.14 / 1501.7</td>
+      <td>0.05 / 1529.4</td>
+      <td>-0.33 / 1611.1</td>
+      <td>0.29 / 1427.1</td>
+      <td>0.03 / 1554.1</td>
+      <td>0.13 / 1533.4</td>
+      <td>0.21 / 1627.5</td>
+      <td>0.23 / 1401.1</td>
     </tr>
     <tr>
       <th></th>
@@ -1108,16 +1108,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
       <td>lidar</td>
       <td>deep learning (two-stream net)</td>
-      <td>-0.14 / 1718.2</td>
-      <td>0.11 / 1111.6</td>
-      <td>0.3 / 1215.4</td>
-      <td>0.12 / 1450.1</td>
-      <td>0.16 / 1597.2</td>
-      <td>0.18 / 1401.5</td>
-      <td>0.05 / 1697.3</td>
-      <td>0.05 / 1413.4</td>
-      <td>0.12 / 1682.8</td>
-      <td>0.31 / 1535.4</td>
+      <td>0.23 / 1255.6</td>
+      <td>-0.05 / 1616.4</td>
+      <td>0.14 / 1505.1</td>
+      <td>0.12 / 1467.3</td>
+      <td>-0.23 / 1550.2</td>
+      <td>0.41 / 1305.3</td>
+      <td>-0.1 / 1660.5</td>
+      <td>0.16 / 1500.8</td>
+      <td>0.31 / 1511.5</td>
+      <td>0.07 / 1537.3</td>
     </tr>
     <tr>
       <th></th>
@@ -1140,16 +1140,16 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>biomass, pooled, plots with usable VNIR (3 datasets)</td>
       <td>vnir</td>
       <td>deep learning (two-stream net)</td>
-      <td>-0.02 / 1624.2</td>
-      <td>-0.02 / 1187.8</td>
-      <td>-0.02 / 1464.3</td>
-      <td>-0.01 / 1554.8</td>
-      <td>-0.07 / 1801.8</td>
-      <td>-0.02 / 1562.4</td>
-      <td>-0.05 / 1785.9</td>
-      <td>-0.05 / 1484.9</td>
-      <td>0.01 / 1779.3</td>
-      <td>-0.01 / 1852.5</td>
+      <td>0.01 / 1427.3</td>
+      <td>-0.07 / 1635.9</td>
+      <td>-0.04 / 1656.3</td>
+      <td>0.0 / 1563.2</td>
+      <td>-0.03 / 1415.1</td>
+      <td>-0.01 / 1705.9</td>
+      <td>-0.04 / 1611.3</td>
+      <td>-0.05 / 1685.7</td>
+      <td>-0.06 / 1879.8</td>
+      <td>-0.0 / 1596.4</td>
     </tr>
     <tr>
       <th></th>
@@ -4626,6 +4626,17 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
     </tr>
     <tr>
       <td>A</td>
+      <td>vnir</td>
+      <td>deep learning (two-stream net)</td>
+      <td>497</td>
+      <td>3</td>
+      <td>-0.01</td>
+      <td>1620.07</td>
+      <td>17.27</td>
+      <td>1610.9 ± 175.0</td>
+    </tr>
+    <tr>
+      <td>A</td>
       <td>fused</td>
       <td>features (nested top 3)</td>
       <td>497</td>
@@ -4711,6 +4722,66 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
     </tr>
   </thead>
   <tbody>
+    <tr>
+      <td>A</td>
+      <td>AGT 2025-09-22 (anthesis)</td>
+      <td>24</td>
+      <td>24</td>
+      <td>25</td>
+      <td>24</td>
+      <td>24</td>
+      <td>24</td>
+      <td>25</td>
+      <td>24</td>
+      <td>25</td>
+      <td>24</td>
+      <td>243</td>
+    </tr>
+    <tr>
+      <td>A</td>
+      <td>Muresk 2025-09-30 (anthesis)</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>12</td>
+      <td>13</td>
+      <td>12</td>
+      <td>13</td>
+      <td>128</td>
+    </tr>
+    <tr>
+      <td>A</td>
+      <td>Muresk 2025-11-21 (maturity)</td>
+      <td>13</td>
+      <td>13</td>
+      <td>12</td>
+      <td>13</td>
+      <td>13</td>
+      <td>13</td>
+      <td>12</td>
+      <td>13</td>
+      <td>12</td>
+      <td>12</td>
+      <td>126</td>
+    </tr>
+    <tr>
+      <td>A</td>
+      <td>total</td>
+      <td>50</td>
+      <td>50</td>
+      <td>50</td>
+      <td>50</td>
+      <td>50</td>
+      <td>50</td>
+      <td>49</td>
+      <td>50</td>
+      <td>49</td>
+      <td>49</td>
+      <td>497</td>
+    </tr>
     <tr>
       <td>B</td>
       <td>Muresk 2025-09-30 (anthesis)</td>
@@ -4810,6 +4881,22 @@ table{border-collapse:collapse;font-size:.82rem;font-variant-numeric:tabular-num
       <td>0.32 / 1450.1</td>
       <td>0.2 / 1265.8</td>
       <td>0.24 / 1291.2</td>
+    </tr>
+    <tr>
+      <th></th>
+      <td>A</td>
+      <td>vnir</td>
+      <td>deep learning (two-stream net)</td>
+      <td>-0.08 / 1809.0</td>
+      <td>-0.02 / 1306.6</td>
+      <td>-0.15 / 1774.5</td>
+      <td>-0.08 / 1795.7</td>
+      <td>-0.12 / 1697.3</td>
+      <td>-0.04 / 1616.5</td>
+      <td>-0.01 / 1532.8</td>
+      <td>-0.01 / 1597.2</td>
+      <td>-0.07 / 1630.4</td>
+      <td>0.02 / 1349.0</td>
     </tr>
     <tr>
       <th></th>
