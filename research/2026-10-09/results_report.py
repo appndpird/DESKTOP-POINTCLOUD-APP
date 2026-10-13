@@ -172,7 +172,7 @@ th{background:var(--soft);text-align:center}td:first-child,th:first-child{text-a
 H = [f"<title>Results - height and biomass models</title>{css}<h1>Results: plant height and above-ground biomass from UAV LiDAR and VNIR</h1>",
      f"<p class='small'>Built {time.strftime('%Y-%m-%d %H:%M')} from Biomass_Height_2026-10-09\\results and the model folders. Features = feature-based machine learning; Deep learning = two-stream network. "
      "All numbers are on held-out test plots.</p>",
-     "<nav>" + " ".join(f"<a href='#{s['id']}'>{s['id']}</a>" for s in SCEN) + " <a href='#methods'>Methods</a> <a href='#summary'>Summary</a></nav>"]
+     "<nav>" + " ".join(f"<a href='#{s['id']}'>{s['id']}</a>" for s in SCEN) + " <a href='#preprocessing'>Preprocessing</a> <a href='#methods'>Methods</a> <a href='#summary'>Summary</a></nav>"]
 
 # ---- summary across scenarios
 srows = []
@@ -186,6 +186,58 @@ H += ["<h2 id='summary'>Summary of all scenarios</h2>",
       "Height is scored only on the flight with a ruler measurement. Biomass is one overall result pooled over the flights of the scenario. R² depends on how different the pooled flights are: "
       "scenario S2 includes AGT maturity, whose mean biomass is much higher, so its R² is larger at about the same rRMSE - compare R² within a scenario and rRMSE across scenarios.</div>",
       tbl(pd.DataFrame(srows))]
+
+# ---- preprocessing and quality control (code: PhenoApp core/qc.py, lidar_features.py, vnir_features.py, spectral_indices.py)
+H += ["<h2 id='preprocessing'>Data preprocessing and quality control</h2>",
+      "<p>Both modalities are cleaned per plot before any feature is computed. Flagged points and unusable spectral values are kept out of every feature; "
+      "missing values are never filled in.</p>",
+      "<h3>LiDAR</h3>",
+      "<p><b>Flight-level checks</b> (reported, not altered): coordinate reference system present; points more than 10 m outside the 1st-99th height percentile band; "
+      "share of single returns (the Ouster cloud is 100 % single-return, so return-based metrics are not used); ground classes, scan angles, flight-line IDs and GPS time encoding; "
+      "with surveyed GCPs, the vertical consistency of the cloud between GCP pairs.</p>",
+      "<p><b>Per plot</b> (the plot polygon plus a 0.25-1.0 m alley ring, neighbouring plots excluded):</p><ol>"
+      "<li><b>Noise</b> - points more than 30 cm above the plot's 99.9th height percentile are flagged as noise (class 7). They are marked, not deleted, and every metric ignores them.</li>"
+      "<li><b>Ground</b> - a robust plane through the alley ring (5th percentile of height in 25 cm cells), refined with in-plot points within ±8 cm; points with |h| ≤ 8 cm are ground (class 2).</li>"
+      "<li><b>Height normalisation</b> - h = z − plane(x, y).</li>"
+      "<li><b>Canopy</b> - h > 10 cm is canopy (class 5); 8-10 cm is low vegetation (class 3).</li>"
+      "<li><b>Features</b> on canopy points only: height percentiles, canopy-top P90/P95/P99 (5 cm cell maxima, 15 cm edge trim), density layers, cover, voxel volume, "
+      "gap fraction and LAI proxy −ln(Pgap)/0.5 (also on the 20 cm-trimmed plot interior, because the polygons include alley soil), rumple, roughness, intensity normalised by the alley ground.</li></ol>",
+      "<div class='box warn'><b>Why not statistical outlier removal?</b> On the validation flight (about 30,000 points/m²) every statistical-outlier variant removed sparse canopy tips (heads and awns; 0.3-1.5 % of points, "
+      "half of them in the top 5 % of the canopy) and lowered the correlation of canopy-top P95 with the ruler height from r 0.70 (unfiltered) to 0.68-0.66. "
+      "The gap rule flagged a single point in the whole trial.</div>",
+      "<h3>VNIR</h3><ol>"
+      "<li><b>Is the flight usable?</b> A cube fails the reflectance check when its median NDVI is below 0.05, or when it is a float cube without a scale factor and NIR above 2 (still radiance). "
+      "AGT maturity fails this check and has no VNIR features.</li>"
+      "<li><b>Pixel cleaning</b> - a value of 0 is a negative reflectance clipped to zero by the processing software and is treated as missing, not as zero. "
+      "Three wavelength ranges are never used: 0-415 nm (sensor edge, weak signal), 755-770 nm (O<sub>2</sub>-A absorption) and 928-962 nm (water-vapour absorption).</li>"
+      "<li><b>Soil mask per flight</b> - NDVI from 800 and 670 nm, split with Otsu's method; threshold bounded to 0.15-0.50; switched off when a senesced canopy shows no soil/crop contrast.</li>"
+      "<li><b>Per-plot rules</b> - a band or index is NaN for a plot when it is valid on fewer than 50 % of the plot's pixels (otherwise the mean would come only from the brighter surviving pixels and be biased high). "
+      "When 670 nm is valid on 50 % of the pixels or fewer, every index using a red band (620-690 nm) is NaN (<i>red_ok</i> = 0). "
+      "Plot QC (<i>vnir_qc_ok</i>): more than 90 % of the plot inside the cube, vegetation cover above 0.2, reflectance cube.</li></ol>",
+      "<h3>Valid and invalid bands</h3><p>Band validity is decided at three levels, each building on the previous one:</p>",
+      tbl(pd.DataFrame([
+          {"level": "Band in a plot", "rule": "outside the three excluded ranges and valid on ≥ 50 % of the plot's pixels", "result": "per-plot spectra tables (NaN otherwise)"},
+          {"level": "Band for the dataset (common bands)", "rule": "usable on ≥ 95 % of the plots of every reflectance flight", "result": "111 bands: 522-645, 691-754, 772-926, 965-1000 nm (networks, spectral PCA families)"},
+          {"level": "Band for the Muresk-only runs", "rule": "the same 95 % rule on the two Muresk flights", "result": "138 bands: 469-754, 772-926, 965-1000 nm (142 with the four O2-A bands)"},
+          {"level": "Plot (valid-band scenarios)", "rule": "rule A: all 111 bands valid on ≥ 50 % of pixels + plot QC + reflectance; rule B: ≥ 95 % of pixels and ≥ 95 % of the plot inside the cube",
+           "result": "rule A 497 plot-flights (S4); rule B 209, Muresk only (S5)"}])),
+      "<p class='small'>The common list lacks 415-522 nm (blue) and 645-691 nm (red) compared with the Muresk list because those bands are clipped to zero on many AGT anthesis plots - a property of the data, not a design choice.</p>",
+      "<h3>Comparison with the literature</h3>",
+      tbl(pd.DataFrame([
+          {"step": "Noise → ground → height normalisation → canopy threshold → plot percentile metrics", "status": "standard", "note": "usual sequence in crop LiDAR (e.g. Madec et al. 2017; ten Harkel et al. 2020)"},
+          {"step": "Canopy threshold 10 cm", "status": "standard", "note": "5-15 cm is typical"},
+          {"step": "Gap fraction and Beer-Lambert LAI proxy (G = 0.5)", "status": "standard", "note": "e.g. Jimenez-Berni et al. 2018 (wheat)"},
+          {"step": "Removing sensor-edge, O2-A and water-vapour bands", "status": "standard", "note": "the usual hyperspectral bad-band list"},
+          {"step": "NDVI soil mask with Otsu threshold", "status": "standard", "note": "Otsu 1979"},
+          {"step": "log reflectance + SNV before spectral PCA", "status": "standard", "note": "common spectroscopy preprocessing (SNV: Barnes et al. 1989)"},
+          {"step": "Ground from a plot-local alley plane", "status": "adapted", "note": "most studies use a global ground filter (CSF, PMF, SMRF) or a bare-soil scan; a local plane suits flat trial plots"},
+          {"step": "Gap noise rule instead of statistical outlier removal", "status": "adapted", "note": "SOR is the usual choice; replaced after our own test (box above)"},
+          {"step": "Interior gap metrics", "status": "adapted", "note": "from our diagnosis that the polygons include alley soil"},
+          {"step": "50 % per-plot and 95 % per-dataset band thresholds", "status": "own choice", "note": "reasonable conventions; rarely specified in papers, which often average all pixels or drop bands by inspection"},
+          {"step": "Clipped zeros treated as missing; red-based indices censored", "status": "own choice", "note": "sound but rarely discussed"},
+          {"step": "Savitzky-Golay smoothing; BRDF/illumination correction between flights", "status": "not applied", "note": "common in the literature; red-edge derivatives here use the raw mean spectrum"},
+      ])),
+      ]
 
 # ---- methods
 H += ["<h2 id='methods'>Methods in brief</h2>",
