@@ -205,6 +205,41 @@ H += ["<h2 id='preprocessing'>Data preprocessing and quality control</h2>",
       "<div class='box warn'><b>Why not statistical outlier removal?</b> On the validation flight (about 30,000 points/m²) every statistical-outlier variant removed sparse canopy tips (heads and awns; 0.3-1.5 % of points, "
       "half of them in the top 5 % of the canopy) and lowered the correlation of canopy-top P95 with the ruler height from r 0.70 (unfiltered) to 0.68-0.66. "
       "The gap rule flagged a single point in the whole trial.</div>",
+      "<h3>The LiDAR rules explained</h3>",
+      "<p><b>1. Gross-outlier check (whole flight, report only).</b> The 1st (p1) and 99th (p99) elevation percentiles of all points are computed, and points below p1 − 10 m or above p99 + 10 m are counted. "
+      "Percentiles are used because the minimum and maximum are themselves set by the outliers (one bird return at +80 m makes the maximum useless as a reference). "
+      "A 10 m margin catches only gross errors: birds, dust or insects in the air, multipath returns below the ground, sensor glitches. "
+      "Grade: PASS below 0.01 % of the points, WARN below 0.1 %, FAIL otherwise (the flight needs cleaning or checking first).</p>",
+      "<p><b>2. Noise rule ('gap', per plot).</b> The 99.9th elevation percentile (p99.9) of the plot's points is computed, and any point more than 30 cm above it is flagged as noise (class 7). "
+      "At about 30,000 points/m² a plot holds a few hundred thousand points, so p99.9 is effectively the top of the canopy, with only a few hundred points above it. "
+      "Real heads and awns form a continuous layer at that level; a point 30 cm above the canopy top with empty air in between cannot be plant material. "
+      "A neighbour-distance (statistical outlier) filter instead flags wherever points are sparse, which in a cereal canopy is exactly the real tips of heads and awns. "
+      "Flagged points stay in the file (class 7, withheld flag in the written LAS) so they can be inspected; every height, cover and gap metric skips them.</p>",
+      "<p><b>3. Ground plane (per plot).</b> The ground under a closed canopy is invisible, so it is estimated from the alleys around the plot:</p><ol>"
+      "<li><b>Alley ring</b> - the area between 0.25 m and 1.0 m from the plot edge, minus anything within 0.25 m of any plot (neighbours included): bare alley soil without overhanging canopy.</li>"
+      "<li><b>25 cm cells, 5th percentile</b> - each 25 × 25 cm cell of the ring is represented by the 5th percentile of its elevations, i.e. the soil surface. "
+      "Not the minimum (a single low multipath point would pull it down) and not the mean (weeds and stubble would lift it).</li>"
+      "<li><b>Robust plane</b> - z = c<sub>0</sub> + c<sub>1</sub>x + c<sub>2</sub>y fitted to the cell values by least squares; cells more than 2.5 robust standard deviations (from the median absolute deviation) "
+      "off the plane are rejected and the plane refitted, up to 4 times, which removes cells with a weed, a clod or a wheel rut. A plane is enough because a plot is only a few metres long.</li>"
+      "<li><b>Refinement</b> - points inside the plot within ±8 cm of the ring plane (soil seen through canopy gaps) are added and the plane refitted; the refined plane is kept only if its RMS misfit is below 6 cm, otherwise the ring-only plane is used.</li>"
+      "<li><b>Fallback</b> - with 200 ring points or fewer, the ground is a flat level at the 1st percentile of the plot's own points.</li></ol>"
+      "<p class='small'>The sidecar JSON of each classified plot LAS records the ground source (ring, ring + in-plot, fallback), the plane coefficients and the RMS misfit.</p>",
+      "<p><b>4. Height normalisation.</b> h = z − plane(x, y), computed for every point with the plane value at that point's own position, so on a sloping plot each point is measured against the ground beneath it, not one average level. "
+      "Example: ground plane 245.32 m at a spot, head at 246.17 m there → h = 0.85 m. h is written as the <i>HeightAboveGround</i> attribute of the classified LAS.</p>",
+      "<p><b>5. Classes from height above ground.</b></p>",
+      tbl(pd.DataFrame([
+          {"h": "|h| ≤ 8 cm", "class": "2 ground", "meaning": "soil, within the tolerance of the ground fit"},
+          {"h": "8 cm < h ≤ 10 cm", "class": "3 low vegetation", "meaning": "buffer zone where soil and plant cannot be told apart"},
+          {"h": "h > 10 cm", "class": "5 canopy", "meaning": "the crop; used by every canopy metric"},
+          {"h": "h < −8 cm", "class": "1 unclassified", "meaning": "below the ground plane (multipath, ruts)"},
+          {"h": "flagged in step 2", "class": "7 noise", "meaning": "ignored by all metrics"}])),
+      "<p><b>Why 8 cm:</b> it covers the scatter of real soil around a plane (clods, furrows, sowing rows; fit RMS typically a few cm), the ranging noise of the sensor and small plane-fit errors; "
+      "a tighter value would push genuine soil into 'vegetation'. <b>Why 10 cm:</b> the 8 cm tolerance plus a 2 cm buffer, so only points clearly above the soil count as crop; "
+      "the 8-10 cm band holds the ambiguous points and is left out of both soil and canopy. Thresholds of 5-15 cm are typical in crop LiDAR studies.</p>",
+      "<div class='box warn'><b>Consequences to keep in mind.</b><ul>"
+      "<li>Gap fraction (ground points ÷ all points) slightly overestimates soil: leaves or lodged plants within 8 cm of the soil count as ground. The bias is usually small at anthesis and maturity.</li>"
+      "<li>Crops shorter than about 10 cm (early growth stages) would be mostly lost from the canopy metrics; the thresholds suit these flights but would need lowering for seedling-stage work.</li>"
+      "<li>A single plane cannot follow raised beds or strong micro-relief inside a plot; heights would then be biased by the bed height. This is not an issue on these trials.</li></ul></div>",
       "<h3>VNIR</h3><ol>"
       "<li><b>Is the flight usable?</b> A cube fails the reflectance check when its median NDVI is below 0.05, or when it is a float cube without a scale factor and NIR above 2 (still radiance). "
       "AGT maturity fails this check and has no VNIR features.</li>"

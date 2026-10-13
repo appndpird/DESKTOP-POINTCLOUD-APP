@@ -9,7 +9,7 @@ th{background:var(--soft);text-align:center}td:first-child,th:first-child{text-a
 .kpi{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}.kpi div{background:var(--soft);padding:10px 14px;border-radius:8px;min-width:200px}
 .kpi b{display:block;font-size:1.25rem}.small{color:var(--muted);font-size:.86rem}nav a{margin-right:14px}
 </style><h1>Results: plant height and above-ground biomass from UAV LiDAR and VNIR</h1>
-<p class='small'>Built 2026-10-13 17:10 from Biomass_Height_2026-10-09\results and the model folders. Features = feature-based machine learning; Deep learning = two-stream network. All numbers are on held-out test plots.</p>
+<p class='small'>Built 2026-10-13 18:03 from Biomass_Height_2026-10-09\results and the model folders. Features = feature-based machine learning; Deep learning = two-stream network. All numbers are on held-out test plots.</p>
 <nav><a href='#S1'>S1</a> <a href='#S2'>S2</a> <a href='#S3'>S3</a> <a href='#S4'>S4</a> <a href='#S5'>S5</a> <a href='#preprocessing'>Preprocessing</a> <a href='#methods'>Methods</a> <a href='#summary'>Summary</a></nav>
 <h2 id='summary'>Summary of all scenarios</h2>
 <div class='box'><b>How to read the numbers.</b> R², RMSE and rRMSE (RMSE as % of the mean) are computed on all test plots of the 10 cross-validation folds together; every plot is a test plot exactly once and was never seen by the model that predicted it. Height is scored only on the flight with a ruler measurement. Biomass is one overall result pooled over the flights of the scenario. R² depends on how different the pooled flights are: scenario S2 includes AGT maturity, whose mean biomass is much higher, so its R² is larger at about the same rRMSE - compare R² within a scenario and rRMSE across scenarios.</div>
@@ -250,6 +250,50 @@ th{background:var(--soft);text-align:center}td:first-child,th:first-child{text-a
 <p><b>Flight-level checks</b> (reported, not altered): coordinate reference system present; points more than 10 m outside the 1st-99th height percentile band; share of single returns (the Ouster cloud is 100 % single-return, so return-based metrics are not used); ground classes, scan angles, flight-line IDs and GPS time encoding; with surveyed GCPs, the vertical consistency of the cloud between GCP pairs.</p>
 <p><b>Per plot</b> (the plot polygon plus a 0.25-1.0 m alley ring, neighbouring plots excluded):</p><ol><li><b>Noise</b> - points more than 30 cm above the plot's 99.9th height percentile are flagged as noise (class 7). They are marked, not deleted, and every metric ignores them.</li><li><b>Ground</b> - a robust plane through the alley ring (5th percentile of height in 25 cm cells), refined with in-plot points within ±8 cm; points with |h| ≤ 8 cm are ground (class 2).</li><li><b>Height normalisation</b> - h = z − plane(x, y).</li><li><b>Canopy</b> - h > 10 cm is canopy (class 5); 8-10 cm is low vegetation (class 3).</li><li><b>Features</b> on canopy points only: height percentiles, canopy-top P90/P95/P99 (5 cm cell maxima, 15 cm edge trim), density layers, cover, voxel volume, gap fraction and LAI proxy −ln(Pgap)/0.5 (also on the 20 cm-trimmed plot interior, because the polygons include alley soil), rumple, roughness, intensity normalised by the alley ground.</li></ol>
 <div class='box warn'><b>Why not statistical outlier removal?</b> On the validation flight (about 30,000 points/m²) every statistical-outlier variant removed sparse canopy tips (heads and awns; 0.3-1.5 % of points, half of them in the top 5 % of the canopy) and lowered the correlation of canopy-top P95 with the ruler height from r 0.70 (unfiltered) to 0.68-0.66. The gap rule flagged a single point in the whole trial.</div>
+<h3>The LiDAR rules explained</h3>
+<p><b>1. Gross-outlier check (whole flight, report only).</b> The 1st (p1) and 99th (p99) elevation percentiles of all points are computed, and points below p1 − 10 m or above p99 + 10 m are counted. Percentiles are used because the minimum and maximum are themselves set by the outliers (one bird return at +80 m makes the maximum useless as a reference). A 10 m margin catches only gross errors: birds, dust or insects in the air, multipath returns below the ground, sensor glitches. Grade: PASS below 0.01 % of the points, WARN below 0.1 %, FAIL otherwise (the flight needs cleaning or checking first).</p>
+<p><b>2. Noise rule ('gap', per plot).</b> The 99.9th elevation percentile (p99.9) of the plot's points is computed, and any point more than 30 cm above it is flagged as noise (class 7). At about 30,000 points/m² a plot holds a few hundred thousand points, so p99.9 is effectively the top of the canopy, with only a few hundred points above it. Real heads and awns form a continuous layer at that level; a point 30 cm above the canopy top with empty air in between cannot be plant material. A neighbour-distance (statistical outlier) filter instead flags wherever points are sparse, which in a cereal canopy is exactly the real tips of heads and awns. Flagged points stay in the file (class 7, withheld flag in the written LAS) so they can be inspected; every height, cover and gap metric skips them.</p>
+<p><b>3. Ground plane (per plot).</b> The ground under a closed canopy is invisible, so it is estimated from the alleys around the plot:</p><ol><li><b>Alley ring</b> - the area between 0.25 m and 1.0 m from the plot edge, minus anything within 0.25 m of any plot (neighbours included): bare alley soil without overhanging canopy.</li><li><b>25 cm cells, 5th percentile</b> - each 25 × 25 cm cell of the ring is represented by the 5th percentile of its elevations, i.e. the soil surface. Not the minimum (a single low multipath point would pull it down) and not the mean (weeds and stubble would lift it).</li><li><b>Robust plane</b> - z = c<sub>0</sub> + c<sub>1</sub>x + c<sub>2</sub>y fitted to the cell values by least squares; cells more than 2.5 robust standard deviations (from the median absolute deviation) off the plane are rejected and the plane refitted, up to 4 times, which removes cells with a weed, a clod or a wheel rut. A plane is enough because a plot is only a few metres long.</li><li><b>Refinement</b> - points inside the plot within ±8 cm of the ring plane (soil seen through canopy gaps) are added and the plane refitted; the refined plane is kept only if its RMS misfit is below 6 cm, otherwise the ring-only plane is used.</li><li><b>Fallback</b> - with 200 ring points or fewer, the ground is a flat level at the 1st percentile of the plot's own points.</li></ol><p class='small'>The sidecar JSON of each classified plot LAS records the ground source (ring, ring + in-plot, fallback), the plane coefficients and the RMS misfit.</p>
+<p><b>4. Height normalisation.</b> h = z − plane(x, y), computed for every point with the plane value at that point's own position, so on a sloping plot each point is measured against the ground beneath it, not one average level. Example: ground plane 245.32 m at a spot, head at 246.17 m there → h = 0.85 m. h is written as the <i>HeightAboveGround</i> attribute of the classified LAS.</p>
+<p><b>5. Classes from height above ground.</b></p>
+<div class='tw'><table class="dataframe">
+  <thead>
+    <tr style="text-align: right;">
+      <th>h</th>
+      <th>class</th>
+      <th>meaning</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>|h| ≤ 8 cm</td>
+      <td>2 ground</td>
+      <td>soil, within the tolerance of the ground fit</td>
+    </tr>
+    <tr>
+      <td>8 cm < h ≤ 10 cm</td>
+      <td>3 low vegetation</td>
+      <td>buffer zone where soil and plant cannot be told apart</td>
+    </tr>
+    <tr>
+      <td>h > 10 cm</td>
+      <td>5 canopy</td>
+      <td>the crop; used by every canopy metric</td>
+    </tr>
+    <tr>
+      <td>h < −8 cm</td>
+      <td>1 unclassified</td>
+      <td>below the ground plane (multipath, ruts)</td>
+    </tr>
+    <tr>
+      <td>flagged in step 2</td>
+      <td>7 noise</td>
+      <td>ignored by all metrics</td>
+    </tr>
+  </tbody>
+</table></div>
+<p><b>Why 8 cm:</b> it covers the scatter of real soil around a plane (clods, furrows, sowing rows; fit RMS typically a few cm), the ranging noise of the sensor and small plane-fit errors; a tighter value would push genuine soil into 'vegetation'. <b>Why 10 cm:</b> the 8 cm tolerance plus a 2 cm buffer, so only points clearly above the soil count as crop; the 8-10 cm band holds the ambiguous points and is left out of both soil and canopy. Thresholds of 5-15 cm are typical in crop LiDAR studies.</p>
+<div class='box warn'><b>Consequences to keep in mind.</b><ul><li>Gap fraction (ground points ÷ all points) slightly overestimates soil: leaves or lodged plants within 8 cm of the soil count as ground. The bias is usually small at anthesis and maturity.</li><li>Crops shorter than about 10 cm (early growth stages) would be mostly lost from the canopy metrics; the thresholds suit these flights but would need lowering for seedling-stage work.</li><li>A single plane cannot follow raised beds or strong micro-relief inside a plot; heights would then be biased by the bed height. This is not an issue on these trials.</li></ul></div>
 <h3>VNIR</h3><ol><li><b>Is the flight usable?</b> A cube fails the reflectance check when its median NDVI is below 0.05, or when it is a float cube without a scale factor and NIR above 2 (still radiance). AGT maturity fails this check and has no VNIR features.</li><li><b>Pixel cleaning</b> - a value of 0 is a negative reflectance clipped to zero by the processing software and is treated as missing, not as zero. Three wavelength ranges are never used: 0-415 nm (sensor edge, weak signal), 755-770 nm (O<sub>2</sub>-A absorption) and 928-962 nm (water-vapour absorption).</li><li><b>Soil mask per flight</b> - NDVI from 800 and 670 nm, split with Otsu's method; threshold bounded to 0.15-0.50; switched off when a senesced canopy shows no soil/crop contrast.</li><li><b>Per-plot rules</b> - a band or index is NaN for a plot when it is valid on fewer than 50 % of the plot's pixels (otherwise the mean would come only from the brighter surviving pixels and be biased high). When 670 nm is valid on 50 % of the pixels or fewer, every index using a red band (620-690 nm) is NaN (<i>red_ok</i> = 0). Plot QC (<i>vnir_qc_ok</i>): more than 90 % of the plot inside the cube, vegetation cover above 0.2, reflectance cube.</li></ol>
 <h3>Valid and invalid bands</h3><p>Band validity is decided at three levels, each building on the previous one:</p>
 <div class='tw'><table class="dataframe">
