@@ -16,6 +16,70 @@ def rd(p): return pd.read_csv(p) if os.path.exists(p) else None
 def img(fig):
     b = io.BytesIO(); fig.savefig(b, format="png", dpi=110, bbox_inches="tight"); plt.close(fig)
     return f"<img src='data:image/png;base64,{base64.b64encode(b.getvalue()).decode()}'>"
+SOIL, CAN, GEST, MODE = "#854F0B", "#639922", "#D85A30", "#7F77DD"
+
+def fig_ground_topview():
+    """Schematic top view: 3 x 3 plots, the alley ring of the centre plot and its 25 cm cells (not to scale)."""
+    w, l, cxs, cys = 1.5, 4.0, [0.0, 2.3, 4.6], [0.0, 5.0, 10.0]
+    tx, ty = 2.3, 5.0
+    def dist(x, y, cx, cy): return np.hypot(np.maximum(np.abs(x - cx) - w / 2, 0), np.maximum(np.abs(y - cy) - l / 2, 0))
+    g = np.arange(-1.5, 6.6, 0.25) + 0.125; gy = np.arange(-2.5, 12.6, 0.25) + 0.125; X, Y = np.meshgrid(g, gy)
+    near_any = np.zeros_like(X, bool)
+    for cx in cxs:
+        for cy in cys: near_any |= dist(X, Y, cx, cy) <= 0.25
+    ring = (dist(X, Y, tx, ty) <= 1.0) & ~near_any
+    fig, ax = plt.subplots(figsize=(4.6, 5.6))
+    for cx in cxs:
+        for cy in cys:
+            hit = (cx, cy) == (tx, ty)
+            ax.add_patch(plt.Rectangle((cx - w / 2, cy - l / 2), w, l, fc=CAN, alpha=0.55 if hit else 0.22, ec="#3B6D11", lw=1.4 if hit else 0.5))
+    for x, y in zip(X[ring], Y[ring]):
+        ax.add_patch(plt.Rectangle((x - 0.11, y - 0.11), 0.22, 0.22, fc=GEST, ec="none", alpha=0.85))
+    ax.text(tx, ty, "plot", ha="center", va="center", fontsize=9, color="#173404")
+    ax.set_xlim(-1.3, 5.9); ax.set_ylim(-2.6, 12.6); ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+    ax.set_xlabel("alley ring of the centre plot: 0.25-1.0 m from its edge,\nleaving out anything within 0.25 m of any plot", fontsize=8, color=GEST)
+    ax.set_title("Top view: where the ground of one plot comes from\n(each orange square = one 25 cm cell; schematic)", fontsize=9)
+    for s in ax.spines.values(): s.set_visible(False)
+    return img(fig)
+
+def fig_ground_side():
+    """Side view of a column of plots on sloping ground: one flat level per column (Jimenez-Berni et al. 2018) vs a plane per plot (ours)."""
+    fig, axs = plt.subplots(2, 1, figsize=(8.2, 5.4), sharex=True)
+    gnd = lambda x: 0.04 * x
+    plots = [(0.5, 2.0), (2.6, 4.1), (4.7, 6.2)]
+    for k, ax in enumerate(axs):
+        xs = np.linspace(0, 6.7, 50); ax.plot(xs, gnd(xs), color=SOIL, lw=2, label="soil surface")
+        for a, b in plots:
+            ax.fill([a, a, b, b], [gnd(a), gnd(a) + 0.8, gnd(b) + 0.82, gnd(b)], color=CAN, alpha=0.35, ec="#3B6D11", lw=0.5)
+        if k == 0:
+            lev = gnd(xs).mean(); ax.plot(xs, np.full_like(xs, lev), color=GEST, lw=2, ls="--", label="ground estimate: one level for the column")
+            ax.set_title("A. Jimenez-Berni et al. 2018: peak of the column's height histogram = one flat ground level", fontsize=9, loc="left")
+            ax.annotate("ground set too high here\n(heights too small)", (1.2, lev), (0.05, 0.55), fontsize=8, arrowprops=dict(arrowstyle="->", lw=0.6))
+            ax.annotate("ground set too low here\n(heights too large)", (5.4, lev), (4.6, 0.55), fontsize=8, arrowprops=dict(arrowstyle="->", lw=0.6))
+        else:
+            for a, b in plots:
+                xx = np.array([a - 0.35, b + 0.35]); ax.plot(xx, gnd(xx) - 0.01, color=GEST, lw=2, ls="--")
+                for xc in (a - 0.3, a - 0.15, b + 0.15, b + 0.3):
+                    ax.plot(xc, gnd(xc) - 0.01, "s", color=GEST, ms=4)
+            ax.plot([], [], color=GEST, lw=2, ls="--", marker="s", ms=4, label="ground estimate: a tilted plane per plot from its alley cells")
+            ax.set_title("B. Ours: each plot gets its own tilted plane, fitted to the alley cells around it", fontsize=9, loc="left")
+        ax.set_ylim(-0.15, 1.5); ax.set_ylabel("elevation (m)"); ax.legend(fontsize=7.5, loc="upper left", frameon=False, ncol=2)
+    axs[1].set_xlabel("distance along the column of plots (m); slope exaggerated, schematic")
+    fig.tight_layout(); return img(fig)
+
+def fig_ground_hist():
+    """Soil returns in one alley cell: histogram mode (Jimenez-Berni) vs 5th percentile (ours)."""
+    rng = np.random.default_rng(0); sd = 2.5; z = rng.normal(0, sd, 4000)
+    fig, ax = plt.subplots(figsize=(6.4, 2.9))
+    ax.hist(z, bins=40, color="#B4B2A9", ec="white", lw=0.4)
+    p5 = np.percentile(z, 5)
+    ax.axvline(0, color=MODE, lw=2, label="mode (histogram peak): Jimenez-Berni et al.")
+    ax.axvline(p5, color=GEST, lw=2, ls="--", label="5th percentile of the cell: ours")
+    yl = ax.get_ylim()[1]; ax.annotate("", (p5, yl * 0.5), (0, yl * 0.5), arrowprops=dict(arrowstyle="<->", lw=0.8))
+    ax.text(p5 - 0.4, yl * 0.62, f"offset ≈ 1.6 × scatter\n({abs(p5):.1f} cm at {sd} cm scatter)", ha="right", va="bottom", fontsize=8)
+    ax.set_xlabel("elevation of the soil returns in one 25 cm alley cell, relative to the mean soil surface (cm)"); ax.set_yticks([])
+    ax.legend(fontsize=7.5, frameon=False, loc="upper right"); fig.tight_layout(); return img(fig)
+
 def tbl(df, fmt=None):
     df = df.copy()
     for c in df.columns:
@@ -224,6 +288,22 @@ H += ["<h2 id='preprocessing'>Data preprocessing and quality control</h2>",
       "<li><b>Refinement</b> - points inside the plot within ±8 cm of the ring plane (soil seen through canopy gaps) are added and the plane refitted; the refined plane is kept only if its RMS misfit is below 6 cm, otherwise the ring-only plane is used.</li>"
       "<li><b>Fallback</b> - with 200 ring points or fewer, the ground is a flat level at the 1st percentile of the plot's own points.</li></ol>"
       "<p class='small'>The sidecar JSON of each classified plot LAS records the ground source (ring, ring + in-plot, fallback), the plane coefficients and the RMS misfit.</p>",
+      "<div class='box'><b>In plain words.</b> Plant height is the top of the crop minus the soil under it. Under a dense canopy the laser hardly ever reaches the soil, "
+      "so the soil level under a plot has to be borrowed from somewhere the laser does see soil: the alleys right around that plot. "
+      "The method collects the alley soil around the plot (orange squares below), fits a flat but tilted sheet through it (the plane), "
+      "slides that sheet under the plot, and measures every point's height from the sheet. Each plot gets its own sheet, so a field that slopes is handled plot by plot.</div>",
+      fig_ground_topview(),
+      "<h3>Comparison with the published method (Jimenez-Berni et al. 2018)</h3>",
+      "<p>Jimenez-Berni et al. (2018, <i>Frontiers in Plant Science</i> 9:237; ground buggy LiDAR on wheat) also take the ground from the bare soil between plots: "
+      "the peak of the height histogram of a whole column of plots gives one ground level for that column, and plant height is a high percentile (0.955) of the plot's points minus that level. "
+      "Our method keeps the idea (ground from the alleys, height = high percentile minus ground) and changes the estimator: one tilted plane per plot instead of one flat level per column (panel B below), "
+      "built from the 5th percentile of 25 cm alley cells with outlier rejection instead of a histogram peak.</p>",
+      fig_ground_side(),
+      "<p>The two estimators can also differ on perfectly flat ground. A histogram peak sits in the middle of the soil returns; a 5th percentile sits about 1.6 times the scatter of the soil returns below the middle. "
+      "With the 1.7-3.5 cm scatter measured on these flights this could put the ring plane roughly 2-5 cm below the mean soil surface (heights slightly larger); "
+      "the refinement with soil points inside the plot probably cancels part of it. <b>This offset is reasoned, not measured</b>; a constant offset does not change correlations or trained models, "
+      "but it does change absolute heights and their bias against the ruler. A direct comparison with the histogram-peak method on these flights is planned.</p>",
+      fig_ground_hist(),
       "<p><b>4. Height normalisation.</b> h = z − plane(x, y), computed for every point with the plane value at that point's own position, so on a sloping plot each point is measured against the ground beneath it, not one average level. "
       "Example: ground plane 245.32 m at a spot, head at 246.17 m there → h = 0.85 m. h is written as the <i>HeightAboveGround</i> attribute of the classified LAS.</p>",
       "<p><b>5. Classes from height above ground.</b></p>",
@@ -265,7 +345,7 @@ H += ["<h2 id='preprocessing'>Data preprocessing and quality control</h2>",
           {"step": "Removing sensor-edge, O2-A and water-vapour bands", "status": "standard", "note": "the usual hyperspectral bad-band list"},
           {"step": "NDVI soil mask with Otsu threshold", "status": "standard", "note": "Otsu 1979"},
           {"step": "log reflectance + SNV before spectral PCA", "status": "standard", "note": "common spectroscopy preprocessing (SNV: Barnes et al. 1989)"},
-          {"step": "Ground from a plot-local alley plane", "status": "adapted", "note": "most studies use a global ground filter (CSF, PMF, SMRF) or a bare-soil scan; a local plane suits flat trial plots"},
+          {"step": "Ground from a plot-local alley plane", "status": "adapted", "note": "same idea as Jimenez-Berni et al. 2018 (ground from bare soil between plots, one level per column); ours fits a tilted plane per plot. Other studies use a ground filter (CSF, PMF, SMRF) or a bare-soil flight"},
           {"step": "Gap noise rule instead of statistical outlier removal", "status": "adapted", "note": "SOR is the usual choice; replaced after our own test (box above)"},
           {"step": "Interior gap metrics", "status": "adapted", "note": "from our diagnosis that the polygons include alley soil"},
           {"step": "50 % per-plot and 95 % per-dataset band thresholds", "status": "own choice", "note": "reasonable conventions; rarely specified in papers, which often average all pixels or drop bands by inspection"},
