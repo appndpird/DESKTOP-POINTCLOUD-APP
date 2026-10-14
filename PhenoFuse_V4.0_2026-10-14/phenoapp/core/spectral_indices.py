@@ -619,9 +619,10 @@ def compute_plot_indices(cube, plots, regions, acronyms, mode: str = "pixel",
 def summarise_indices(df, qc=None) -> str:
     """Plain-text summary table (mean, sd across plots, valid fraction)."""
     lines = [f"{'index':14s} {'mean':>10s} {'sd':>10s} {'min':>10s} {'max':>10s} {'valid%':>7s}"]
+    from pandas.api.types import is_numeric_dtype
     for c in df.columns:
-        if c == "Plot_ID":
-            continue
+        if c in ("Plot_ID", "Plot", "B/R", "Bank", "Row", "Range") or not is_numeric_dtype(df[c]):
+            continue          # plot naming columns carried from the grid are not indices
         v = df[c].to_numpy(float)
         valid = ""
         if qc is not None and f"{c}_valid" in qc.columns:
