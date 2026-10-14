@@ -3,3 +3,6 @@ __pycache__/
 build/
 dist/
 *.log
+*.zip
+!phenoapp_full.zip
+phenoapp_crash.log

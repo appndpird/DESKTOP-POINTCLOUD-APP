@@ -1,6 +1,18 @@
-# Plant Phenotyping from Point Clouds
+# PhenoFuse - multi-sensor plot phenotyping (formerly PhenoApp, Plant Phenotyping from Point Clouds)
 
-**Current version: PhenoApp v3.3.4 (2026-10-12)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
+**Current version: PhenoFuse 4.0 (2026-10-14)** - folder `PhenoFuse_V4.0_2026-10-14/` (README, `RELEASE_NOTES_v4.0.md`,
+`USER_GUIDE.md`, `Models/` with the latest height and biomass models). PhenoFuse is PhenoApp renamed: three modalities per plot
+(LiDAR, VNIR hyperspectral, RGB orthomosaic), one feature table per modality per flight (`plots_lidar/lidar_features.csv`,
+`plots_vnir/vnir_features.csv`, `plots_rgb/rgb_features.csv`), a Dataset tab that pools several flights, and every modelling
+tab (Biomass Models, Height Models, Deep Models) split into *use a pretrained model* and *train from scratch* (any modality
+alone or fused; VNIR as indices, valid reflectance bands or both; ground truth in any biomass unit). All 34 water indices
+of the Awesome Spectral Indices catalogue are listed on the VNIR tab (10 computable from VNIR, plus the hyperspectral
+plant-water indices WBI, NDWI970, WI/NDVI, NWI-1..4) and the O2-A / water-vapour band exclusions are user settings.
+Fixes: outputs of a second flight were written into the first flight's folder; the window can now be resized from any edge.
+**Windows executable:** GitHub Releases, tag `v4.0`, asset `PhenoFuse_v4.0_win64.zip` (unzip and run `PhenoFuse\PhenoFuse.exe`).
+Build it yourself with `PhenoFuse_V4.0_2026-10-14/build_windows.bat`.
+
+**Previous version: PhenoApp v3.3.4 (2026-10-12)** - folder `phenoapp_v3.3_2026-10-09/` (see its README for the full changelog).
 **Windows executable:** GitHub Releases, tag `v3.3.4`, asset `PhenoApp_v3.3.4_win64.zip` (unzip and run
 `PhenoApp_v3\PhenoApp_v3.exe`; no Python needed except for the Deep Models tab, which uses an external torch environment).
 The same release carries `PhenoApp_v3.3.4_twostream_weights.zip` (all fold models of the final network runs).

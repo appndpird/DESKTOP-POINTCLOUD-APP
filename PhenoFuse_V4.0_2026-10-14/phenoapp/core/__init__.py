@@ -1,0 +1,37 @@
+"""Core engine for the phenotyping app — UI-agnostic."""
+from .las_manager   import LASManager, quick_summary
+from .canopy_raster import (build_canopy_raster, build_chm, raster_display_array,
+                            ortho_display_array)
+from .grid_io       import load_grid, save_grid, detect_format, GRID_FILE_FILTER
+from .grid_gen      import generate_grid_from_corners
+from .traits        import (TRAITS_CATALOG, TRAIT_KEYS, TRAIT_BY_KEY,
+                            compute_plot_traits, fit_biomass_k,
+                            fit_biomass_multi, apply_biomass_multi,
+                            BIOMASS_MODEL_PREDICTORS)
+from .units         import (BIOMASS_UNITS, UNIT_KEYS, UNIT_LABELS, AUTO_LABEL,
+                            to_kg_m2, from_kg_m2, resolve_unit,
+                            infer_unit_from_column, area_normalise)
+from .surface_models import (build_surface_models, zonal_chm_stats,
+                             annotate_plot_map)
+from .grid_refine   import refine_grid_to_canopy, render_refine_qa
+from .extract       import extract_all_plots
+from .auto_align    import auto_align_grid
+from .regions       import plot_region
+from .ground_model  import fit_exterior_ground, GroundModel
+from .vnir          import VNIRCube, parse_envi_wavelengths
+from .spectral_indices import (IndexCatalogue, compute_plot_indices, write_index_rasters,
+                               compute_index_window, write_qml_sidecar, RECOMMENDED_BIOMASS,
+                               DEFAULT_EXCLUDED_NM, parse_excluded, summarise_indices)
+from .models        import (MODEL_SUITE, fit_model_suite, results_table,
+                            save_models, load_models, apply_pls,
+                            loocv_linear)
+from .qc            import run_qc, format_report
+from .height_models import (HEIGHT_MODELS, fit_height_models, apply_height_model,
+                            save_height_model, load_height_model)
+from .lidar_features import lidar_features_all, preprocess_plot, LIDAR_V3_CORE
+from .vnir_features import vnir_features_all, VNIR_V3_CORE, DEFAULT_V3_INDICES
+from .biomass_ml import fit_trait_models, feature_family, FAMILIES as ML_FAMILIES, LEARNERS as ML_LEARNERS
+from .rgb_features import extract_rgb_plots, RGB_CORE
+from .dataset import add_flight as dataset_add_flight, scan as dataset_scan, load_training_table, single_flight_table
+from .model_runs import new_run_dir, list_models, top3_ensemble, save_run_meta
+from .cv_utils import make_splits, CV_LABELS

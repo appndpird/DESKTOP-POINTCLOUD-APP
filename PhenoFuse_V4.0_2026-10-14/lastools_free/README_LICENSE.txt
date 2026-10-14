@@ -1,0 +1,1 @@
+This folder contains ONLY the free/open-source subset of LAStools (lasinfo, lasvalidate; LGPL - see COPYING.txt/LICENSE.txt, (c) rapidlasso GmbH, https://rapidlasso.de). The paid LAStools processing tools are NOT included and are never invoked by PhenoApp.
