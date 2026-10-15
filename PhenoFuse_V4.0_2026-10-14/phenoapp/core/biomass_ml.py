@@ -301,8 +301,9 @@ def ground_truth_kg_ha(gt, target, unit="auto", area_by_plot=None):
 
 
 def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_select=12, progress_cb=None, scale_y=None, vnir_cols=None, spectra=None,
-                     plot_ids=None, groups=None, rgb_cols=None, vnir_mode="indices", modalities=None, excluded=None):
+                     plot_ids=None, groups=None, rgb_cols=None, vnir_mode="indices", modalities=None, excluded=None, band_transform="snv"):
     """Nested cross-validated fit of `target_col` (from gt, joined on Plot_ID) on the chosen families x learners.
+    band_transform : "snv" (log10 + SNV) or "raw" reflectance for the sb_<nm> band columns (see pca_families.BAND_TRANSFORMS)
     vnir_cols / rgb_cols : columns of the VNIR / RGB feature tables (tells the families which block a column belongs to)
     spectra   : mean vegetation spectra table (Plot_ID + one column per wavelength) for the band families / VNIR mode 'bands'
     plot_ids  : optional set of Plot_IDs to use (e.g. valid_band_plots(...)); None = every plot with LiDAR QC ok
@@ -319,7 +320,7 @@ def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_selec
         d = d[d.Plot_ID.isin(plot_ids)]
     need_bands = vnir_mode in ("bands", "both") or any(f.endswith("bands_PCA") for f in families)
     if spectra is not None and need_bands:
-        sb = spectra_matrix(spectra, excluded=excluded)
+        sb = spectra_matrix(spectra, excluded=excluded, transform=band_transform)
         if len(sb.columns):
             d = d.merge(sb, left_on="Plot_ID", right_index=True, how="left")
     if vnir_mode == "bands" and vnir_cols:
@@ -418,10 +419,11 @@ def results_table(results, unit=""):
 
 
 def save_model(path, model, feats, meta=None, table=None):
-    """table: the training feature table -> its medians are stored so a feature unusable on a new flight can be filled."""
+    """table: the training feature table -> its medians are stored so a feature unusable on a new flight can be filled.
+    meta["band_transform"] (snv | raw) is also stored at the top level so prediction rebuilds the bands the same way."""
     import joblib
     from .ensembles import feature_medians, feature_ranges
-    joblib.dump({"model": model, "features": feats, "meta": meta or {},
+    joblib.dump({"model": model, "features": feats, "meta": meta or {}, "band_transform": (meta or {}).get("band_transform", "snv"),
                  "feature_medians": feature_medians(table, feats) if table is not None else {},
                  "feature_ranges": feature_ranges(table, feats) if table is not None else {}}, path); return path
 
@@ -435,12 +437,13 @@ def apply_model(df, saved, offset=0.0, spectra=None, folds="all", excluded=None)
     """spectra: mean vegetation spectra table of the flight, needed by the band models (columns sb_<nm>).
     folds: for fold-ensemble files, "all" | "best3" | list of fold numbers (see core.ensembles)."""
     import pandas as pd
-    from .ensembles import is_ensemble, is_fold_ensembles, predict_saved, required_features, fill_missing, range_check
+    from .ensembles import is_ensemble, is_fold_ensembles, predict_saved, required_features, fill_missing, range_check, band_transform
     d = add_weighted(df); feats = required_features(saved, folds); filled = []
     sb = [f for f in feats if f.startswith("sb_")]
     if spectra is not None and sb:
-        # exactly the bands the model was trained on (the flight's usable-band set may differ, e.g. clipped blue bands)
-        sm = spectra_matrix(spectra, excluded=excluded, bands=sb); filled = list(sm.attrs.get("filled_bands", []))
+        # exactly the bands the model was trained on (the flight's usable-band set may differ, e.g. clipped blue bands),
+        # with the transform it was trained with
+        sm = spectra_matrix(spectra, excluded=excluded, bands=sb, transform=band_transform(saved)); filled = list(sm.attrs.get("filled_bands", []))
         d = d.merge(sm, left_on="Plot_ID", right_index=True, how="left")
     d, filled_feats, replaced = fill_missing(saved, d, feats)
     if is_ensemble(saved) or is_fold_ensembles(saved):

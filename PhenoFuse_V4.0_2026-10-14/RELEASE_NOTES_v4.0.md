@@ -26,6 +26,10 @@
   predictions as extrapolations. That model predicts ~20 t/ha on any anthesis table, including the research team's
   own, because the canopy is green at anthesis; it is a growth-stage mismatch, not an extraction difference (218 of
   265 shared features are identical between the app's tables and the research tables of the same flight).
+- **Raw reflectance bands as model input.** Next to "VNIR input" (indices / bands / both) the training panels now have
+  "Band values": `snv` (log10 reflectance + per-plot SNV, the default, illumination-robust) or `raw` (the mean
+  vegetation reflectance of `vnir_spectra.csv` as measured, keeps the absolute level). Every saved model records its
+  choice (`band_transform`) and prediction rebuilds the bands the same way; the pretrained-model description shows it.
 - The false "input feature(s) missing" warning for band features is gone (the bands come from `vnir_spectra.csv`,
   not from the feature table).
 

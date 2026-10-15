@@ -230,8 +230,8 @@ def _metrics(pred, y):
 
 
 def fit_height_models(df, gt, keys, cv: str = "rkf10", progress_cb=None, vnir_df=None, rgb_df=None, groups=None, spectra=None,
-                      vnir_cols=None, rgb_cols=None, vnir_mode="indices", excluded=None):
-    """Fit + validate the chosen models.
+                      vnir_cols=None, rgb_cols=None, vnir_mode="indices", excluded=None, band_transform="snv"):
+    """Fit + validate the chosen models. band_transform: "snv" | "raw" for the reflectance band columns.
 
     df      : feature table (Plot_ID + LiDAR features; VNIR / RGB may already be merged or given as vnir_df / rgb_df)
     gt      : DataFrame Plot_ID + height column (cm, or m if the name ends in _m / values < 5)
@@ -246,7 +246,7 @@ def fit_height_models(df, gt, keys, cv: str = "rkf10", progress_cb=None, vnir_df
     if groups is not None:
         d["_group"] = d["Plot_ID"].map(dict(zip(df["Plot_ID"], groups)))
     if spectra is not None and (vnir_mode in ("bands", "both") or any(HEIGHT_MODELS[k][1] in ("PCA:bands", "PCA:fused_bands") for k in keys)):
-        sb = spectra_matrix(spectra, excluded=excluded)
+        sb = spectra_matrix(spectra, excluded=excluded, transform=band_transform)
         if len(sb.columns):
             d = d.merge(sb, left_on="Plot_ID", right_index=True, how="left")
     if vnir_mode == "bands" and vnir_cols:
@@ -335,7 +335,7 @@ def save_height_model(path, model, feats, meta=None, table=None):
     """table: the prepared training feature table -> its medians are stored so a feature unusable on a new flight can be filled."""
     import joblib
     from .ensembles import feature_medians, feature_ranges
-    joblib.dump({"model": model, "features": feats, "units": "cm", "meta": meta or {},
+    joblib.dump({"model": model, "features": feats, "units": "cm", "meta": meta or {}, "band_transform": (meta or {}).get("band_transform", "snv"),
                  "feature_medians": feature_medians(table, feats) if table is not None else {},
                  "feature_ranges": feature_ranges(table, feats) if table is not None else {}}, path)
     return path
@@ -351,13 +351,14 @@ def apply_height_model(df, saved, offset_cm: float = 0.0, vnir_df=None, spectra=
     offset_cm is added to the prediction (per-flight correction from reference targets or a few measured plots).
     vnir_df / rgb_df / spectra: the flight's VNIR features, RGB features and spectra table, needed by models that use them."""
     import pandas as pd
-    from .ensembles import predict_saved, required_features, fill_missing, range_check
+    from .ensembles import predict_saved, required_features, fill_missing, range_check, band_transform
     d = prepare_features(df, vnir_df, rgb_df)
     need = required_features(saved, folds); filled = []
     sb = [f for f in need if f.startswith("sb_")]
     if spectra is not None and sb:
-        # exactly the bands the model was trained on (the flight's usable-band set may differ, e.g. clipped blue bands)
-        sm = spectra_matrix(spectra, excluded=excluded, bands=sb); filled = list(sm.attrs.get("filled_bands", []))
+        # exactly the bands the model was trained on (the flight's usable-band set may differ, e.g. clipped blue bands),
+        # with the transform it was trained with
+        sm = spectra_matrix(spectra, excluded=excluded, bands=sb, transform=band_transform(saved)); filled = list(sm.attrs.get("filled_bands", []))
         d = d.merge(sm, left_on="Plot_ID", right_index=True, how="left")
     d, filled_feats, replaced = fill_missing(saved, d, need)
     pred, ok = predict_saved(saved, d, folds)

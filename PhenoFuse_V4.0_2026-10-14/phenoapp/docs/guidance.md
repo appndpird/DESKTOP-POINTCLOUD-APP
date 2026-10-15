@@ -129,6 +129,10 @@ numbers on a new flight, read the notes under the prediction:
   That is the growth-stage signature: a maturity model applied to an anthesis flight sees a green canopy (CIRE, NDRE,
   OSAVI several times higher) and extrapolates (the Muresk maturity VNIR ensemble predicts ~20 t/ha at anthesis).
   Use a model trained at the same stage, or train from scratch on this flight / a dataset of similar flights.
+- **Raw bands or SNV bands?** "Band values" on the training panels: `snv` removes each plot's overall brightness
+  (log10 + standard normal variate), so a model transfers better between flights and sun angles; `raw` keeps the
+  absolute reflectance, which can add cover / biomass signal within one flight but drifts between flights. Train both
+  with the same validation and compare the held-out RMSE; a saved model remembers its choice.
 - Keep the LiDAR preprocessing the same as the training run: the research models were trained with per-plot noise
   removal on (rule `sor`); with the noise rule set to `gap` nothing is removed and the density features shift a little.
 

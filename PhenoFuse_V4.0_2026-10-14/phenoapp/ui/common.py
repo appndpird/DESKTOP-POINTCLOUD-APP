@@ -29,6 +29,7 @@ class ModalityBox(QWidget):
     def __init__(self, parent=None, with_vnir_mode=True, on_change=None):
         super().__init__(parent)
         from phenoapp.core.biomass_ml import VNIR_MODES
+        from phenoapp.core.pca_families import BAND_TRANSFORMS
         h = QHBoxLayout(self); h.setContentsMargins(0, 0, 0, 0)
         self.cb_lidar = QCheckBox("LiDAR"); self.cb_vnir = QCheckBox("VNIR"); self.cb_rgb = QCheckBox("RGB")
         self.cb_lidar.setChecked(True); self.cb_vnir.setChecked(True)
@@ -39,7 +40,7 @@ class ModalityBox(QWidget):
         self.cb_lidar.setToolTip("Features of the LiDAR Features tab (lidar_features.csv).")
         self.cb_vnir.setToolTip("Features of the VNIR Spectral Features tab (vnir_features.csv + vnir_spectra.csv).")
         self.cb_rgb.setToolTip("Features of the RGB Features tab (rgb_features.csv).")
-        self.cb_mode = None
+        self.cb_mode = None; self.cb_band = None
         if with_vnir_mode:
             h.addSpacing(12); h.addWidget(QLabel("VNIR input:"))
             self.cb_mode = QComboBox()
@@ -51,6 +52,19 @@ class ModalityBox(QWidget):
             h.addWidget(self.cb_mode, stretch=1)
             if on_change:
                 self.cb_mode.currentIndexChanged.connect(lambda *_: on_change())
+            h.addSpacing(8); h.addWidget(QLabel("Band values:"))
+            self.cb_band = QComboBox()
+            for k, v in BAND_TRANSFORMS.items():
+                self.cb_band.addItem(f"{k}: {v}", k)
+            self.cb_band.setToolTip("How the reflectance bands of vnir_spectra.csv enter the models (bands / both modes and the *_bands_PCA "
+                                    "families). snv: log10 reflectance then per-plot standard normal variate - removes the overall brightness "
+                                    "of a plot, so it transfers better between flights and illumination conditions. raw: the mean vegetation "
+                                    "reflectance (0-1) as measured - keeps the absolute level, which can carry biomass / cover signal within one "
+                                    "flight but shifts with sun angle and calibration between flights. Try both with the same validation; a "
+                                    "saved model remembers its choice and predictions use it automatically.")
+            h.addWidget(self.cb_band, stretch=1)
+            if on_change:
+                self.cb_band.currentIndexChanged.connect(lambda *_: on_change())
         h.addStretch()
 
     def modalities(self):
@@ -58,6 +72,9 @@ class ModalityBox(QWidget):
 
     def vnir_mode(self):
         return self.cb_mode.currentData() if self.cb_mode is not None else "indices"
+
+    def band_transform(self):
+        return self.cb_band.currentData() if self.cb_band is not None else "snv"
 
 
 class TrainingSource(QGroupBox):

@@ -43,7 +43,7 @@ def list_models(root: str, kind: str):
     return out
 
 
-def top3_ensemble(results, fitted, key_fn, n=3, rmse_key="RMSE", table=None):
+def top3_ensemble(results, fitted, key_fn, n=3, rmse_key="RMSE", table=None, band_transform="snv"):
     """results: list of result dicts with 'cv' metrics; fitted: {key: (model, feats)}; key_fn(result) -> key.
     table: the training feature table (its medians are stored for features unusable on a new flight).
     Returns the mean-ensemble dict (core.ensembles format) of the n best by held-out RMSE, or None."""
@@ -62,7 +62,7 @@ def top3_ensemble(results, fitted, key_fn, n=3, rmse_key="RMSE", table=None):
         from .ensembles import feature_medians, feature_ranges
         allf = sorted({f for m in members for f in m["features"]})
         medians = feature_medians(table, allf); ranges = feature_ranges(table, allf)
-    return {"type": "mean_ensemble", "members": members, "feature_medians": medians, "feature_ranges": ranges,
+    return {"type": "mean_ensemble", "members": members, "feature_medians": medians, "feature_ranges": ranges, "band_transform": band_transform,
             "nested_cv": {"R2": float(best.get("R2", best.get("r2", float("nan")))), "RMSE": float(best.get(rmse_key, best.get("rmse", float("nan")))),
                           "note": "score of the best member (held-out); the ensemble itself was not re-validated"}}
 

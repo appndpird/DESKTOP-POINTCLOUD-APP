@@ -69,22 +69,23 @@ class _TrainWorker(QThread):
                     rule_txt = f"\nPlots: {PLOT_RULES[o['plot_rule']]} -> {len(plot_ids)} plots kept"
                 results, pred, fitted = fit_trait_models(df, gt2, tcol, o["families"], o["learners"], cv=o["cv"], n_select=o["n_select"], progress_cb=cb,
                                                          vnir_cols=t["vnir_cols"], spectra=t["spectra"], plot_ids=plot_ids, groups=t["groups"], rgb_cols=t["rgb_cols"],
-                                                         vnir_mode=o["vnir_mode"], modalities=o["modalities"], excluded=t.get("excluded"))
+                                                         vnir_mode=o["vnir_mode"], modalities=o["modalities"], excluded=t.get("excluded"),
+                                                         band_transform=o["band_transform"])
                 pred.to_csv(os.path.join(run_dir, "predictions.csv"), index=False)
                 saved = {}; train_tab = add_weighted(df)
                 for (fam, ln), (model, feats) in fitted.items():
                     fn = f"{fam}_{ln}".replace("[", "_").replace("]", "").replace("/", "_") + ".joblib"
-                    save_model(os.path.join(run_dir, fn), model, feats, meta={"target": tcol, "family": fam, "learner": ln, "cv": o["cv"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"]},
-                               table=train_tab)
+                    save_model(os.path.join(run_dir, fn), model, feats, meta={"target": tcol, "family": fam, "learner": ln, "cv": o["cv"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"],
+                                                                              "band_transform": o["band_transform"]}, table=train_tab)
                     saved[f"{fam}/{ln}"] = fn
-                ens = top3_ensemble(results, fitted, key_fn=lambda r: (r["family"], r["learner"]), rmse_key="RMSE", table=train_tab)
+                ens = top3_ensemble(results, fitted, key_fn=lambda r: (r["family"], r["learner"]), rmse_key="RMSE", table=train_tab, band_transform=o["band_transform"])
                 if ens:
                     import joblib
-                    ens["meta"] = {"target": tcol, "kind": "biomass", "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "cv": o["cv"]}
+                    ens["meta"] = {"target": tcol, "kind": "biomass", "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "cv": o["cv"], "band_transform": o["band_transform"]}
                     joblib.dump(ens, os.path.join(run_dir, "top3_ensemble.joblib"))
                 with open(os.path.join(run_dir, "results.json"), "w") as f:
                     json.dump({"target": tcol, "unit": unit_label, "cv": o["cv"], "n_select": o["n_select"], "results": results, "models": saved,
-                               "flights": t["flights"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"]}, f, indent=1, default=float)
+                               "flights": t["flights"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "band_transform": o["band_transform"]}, f, indent=1, default=float)
                 try:
                     from sklearn.ensemble import RandomForestRegressor
                     d = add_weighted(df).merge(gt2[["Plot_ID", tcol]].dropna(), on="Plot_ID")
@@ -97,7 +98,7 @@ class _TrainWorker(QThread):
                     toptxt = f"\n(top-feature ranking failed: {e})"
                 ok = [r for r in results if r.get("status") == "ok" and r.get("cv")]
                 best = min(ok, key=lambda r: r["cv"]["RMSE"]) if ok else None
-                txt = f"Target: {tcol}" + (f" ({unit_label})" if unit_label else "") + f"; flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}; validation: {CV_LABELS[o['cv']]}\n\n"
+                txt = f"Target: {tcol}" + (f" ({unit_label})" if unit_label else "") + f"; flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}" + (f" (bands: {o['band_transform']})" if o['vnir_mode'] != 'indices' else "") + f"; validation: {CV_LABELS[o['cv']]}\n\n"
                 txt += results_table(results) + toptxt
                 if best:
                     txt += f"\n\nBest by held-out RMSE: {best['family']} / {best['learner']}: R2 {best['cv']['R2']:.3f}, RMSE {best['cv']['RMSE']:.3g}, accuracy {best['cv']['accuracy']:.1f}%\nFeatures: {', '.join(best['features'])}"
@@ -114,7 +115,8 @@ class _TrainWorker(QThread):
                 if gt is None or len(gt) == 0:
                     raise RuntimeError("no ground truth")
                 results, pred, fitted = fit_height_models(df, gt, o["keys"], cv=o["cv"], progress_cb=cb, groups=t["groups"], spectra=t["spectra"],
-                                                          vnir_cols=t["vnir_cols"], rgb_cols=t["rgb_cols"], vnir_mode=o["vnir_mode"], excluded=t.get("excluded"))
+                                                          vnir_cols=t["vnir_cols"], rgb_cols=t["rgb_cols"], vnir_mode=o["vnir_mode"], excluded=t.get("excluded"),
+                                                          band_transform=o["band_transform"])
                 pred.to_csv(os.path.join(run_dir, "predictions.csv"), index=False)
                 saved = {}
                 from phenoapp.core.height_models import prepare_features
@@ -122,18 +124,19 @@ class _TrainWorker(QThread):
                 for k, (model, feats) in fitted.items():
                     fn = f"height_model_{k}.joblib"
                     save_height_model(os.path.join(run_dir, fn), model, feats, meta={"cv": o["cv"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"],
+                                                                                     "band_transform": o["band_transform"],
                                                                                      "results": [r for r in results if r.get("key") == k]}, table=train_tab)
                     saved[k] = fn
-                ens = top3_ensemble(results, fitted, key_fn=lambda r: r["key"], rmse_key="rmse", table=train_tab)
+                ens = top3_ensemble(results, fitted, key_fn=lambda r: r["key"], rmse_key="rmse", table=train_tab, band_transform=o["band_transform"])
                 if ens:
                     import joblib
-                    ens["meta"] = {"kind": "height", "units": "cm", "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "cv": o["cv"]}
+                    ens["meta"] = {"kind": "height", "units": "cm", "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "cv": o["cv"], "band_transform": o["band_transform"]}
                     joblib.dump(ens, os.path.join(run_dir, "top3_ensemble.joblib"))
                 with open(os.path.join(run_dir, "results.json"), "w") as f:
-                    json.dump({"cv": o["cv"], "n_plots": int(len(pred)), "results": results, "models": saved, "flights": t["flights"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"]}, f, indent=1, default=float)
+                    json.dump({"cv": o["cv"], "n_plots": int(len(pred)), "results": results, "models": saved, "flights": t["flights"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "band_transform": o["band_transform"]}, f, indent=1, default=float)
                 ok = [r for r in results if r.get("status") == "ok" and r.get("cv")]
                 best = min(ok, key=lambda r: r["cv"]["rmse"]) if ok else None
-                txt = f"Flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}; validation: {CV_LABELS[o['cv']]}\n\n" + results_table(results)
+                txt = f"Flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}" + (f" (bands: {o['band_transform']})" if o['vnir_mode'] != 'indices' else "") + f"; validation: {CV_LABELS[o['cv']]}\n\n" + results_table(results)
                 txt += (f"\n\nColumn guide: cv* = every plot predicted by a model that never saw it; fit* = in-sample. Compare cvRMSE with the SD of the measured "
                         "heights: equal means no skill. Slope near 1 means the model tracks plot differences one for one.")
                 if best:
@@ -143,7 +146,7 @@ class _TrainWorker(QThread):
                         c = r["calibration"]; txt += f"\nCalibration line ({r['key']}): height_cm = {c['intercept_cm']:.2f} + {c['slope']:.3f} x {c['predictor']}_cm"
                 if ens:
                     txt += "\n\nTop-three mean ensemble saved (top3_ensemble.joblib): " + ", ".join(m["family"] for m in ens["members"])
-            save_run_meta(run_dir, kind=self.kind, flights=t["flights"], modalities=o["modalities"], vnir_mode=o["vnir_mode"], cv=o["cv"],
+            save_run_meta(run_dir, kind=self.kind, flights=t["flights"], modalities=o["modalities"], vnir_mode=o["vnir_mode"], band_transform=o["band_transform"], cv=o["cv"],
                           n_rows=int(len(df)), options={k: v for k, v in o.items() if k not in ("families", "learners", "keys")}, families=o.get("families"), learners=o.get("learners"), keys=o.get("keys"))
             txt += f"\n\nRun folder -> {run_dir}\n  predictions.csv, results.json, run.json, {len(saved)} model files" + (", top3_ensemble.joblib" if ens else "")
             self.progress.emit(100, "done"); self.done_ok.emit(txt)
@@ -268,7 +271,7 @@ class TrainPanel(QWidget):
             t, root = self.src.load(mods, gt_required=True)
         except Exception as e:
             QMessageBox.warning(self, "Training data", str(e)); return
-        o = dict(modalities=mods, vnir_mode=self.mod.vnir_mode(), cv=self.cb_cv.currentData(), n_select=self.sp_sel.value(), run_name=self.ed_run.text().strip())
+        o = dict(modalities=mods, vnir_mode=self.mod.vnir_mode(), band_transform=self.mod.band_transform(), cv=self.cb_cv.currentData(), n_select=self.sp_sel.value(), run_name=self.ed_run.text().strip())
         if self.kind == "biomass":
             lrn = [k for k, cb in self.cb_lrn.items() if cb.isChecked() and cb.isEnabled()]
             if not lrn:
@@ -350,8 +353,10 @@ class PretrainedPanel(QWidget):
             from phenoapp.core.ensembles import describe, required_features
             saved = joblib.load(p); meta = saved.get("meta", {}) if isinstance(saved, dict) else {}
             need = required_features(saved)
+            from phenoapp.core.ensembles import band_transform
+            bt = f"; bands: {band_transform(saved)}" if any(f.startswith("sb_") for f in need) else ""
             self.lbl_model.setText(f"{describe(saved)}; target {meta.get('target', 'height_cm' if self.kind == 'height' else '?')}; "
-                                   f"modalities {'+'.join(meta.get('modalities', [])) or '?'}; {len(need)} input features, e.g. {', '.join(need[:8])}")
+                                   f"modalities {'+'.join(meta.get('modalities', [])) or '?'}{bt}; {len(need)} input features, e.g. {', '.join(need[:8])}")
         except Exception as e:
             self.lbl_model.setText(f"cannot read: {e}")
 

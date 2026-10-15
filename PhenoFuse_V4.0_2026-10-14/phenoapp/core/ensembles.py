@@ -58,6 +58,13 @@ def required_features(saved, folds="all"):
     return out
 
 
+def band_transform(saved) -> str:
+    """The band transform a saved model was trained with ("snv" unless it says "raw")."""
+    if not isinstance(saved, dict):
+        return "snv"
+    return saved.get("band_transform") or (saved.get("meta") or {}).get("band_transform") or "snv"
+
+
 def fill_missing(saved, d, feats):
     """NaN cells of the needed (non-band) feature columns of d: first the column median over the plots of this flight,
     then - for a feature that is NaN on every plot (e.g. an index that needs a band clipped on this sensor) - the

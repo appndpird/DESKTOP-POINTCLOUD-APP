@@ -21,7 +21,7 @@ Public API
 PCA_FAMILIES, PCA_VAR, FAMILY_BLOCKS
 numeric_feature_columns(df, exclude)            finite numeric feature columns of a table
 split_blocks(df, feats, vnir_cols, rgb_cols)    -> dict(lidar, vnir, rgb, bands)
-spectra_matrix(spectra_df, min_frac, excluded, bands=None)  -> DataFrame Plot_ID-indexed, columns sb_<nm> (bands= exact list for inference)
+spectra_matrix(spectra_df, min_frac, excluded, bands=None, transform='snv'|'raw')  -> DataFrame Plot_ID-indexed, columns sb_<nm> (bands= exact list for inference)
 family_inputs(family, df, exclude, vnir_cols, rgb_cols, vnir_mode) -> (columns, blocks)
 pca_preprocessor(blocks)                        ColumnTransformer: StandardScaler -> PCA(0.95) per block
 make_pca_learner(name, pre, scale_y)            pipeline preprocessor -> learner
@@ -60,7 +60,7 @@ def numeric_feature_columns(df, exclude=(), min_finite=0.95):
     >= min_finite of the rows and not constant."""
     cols = []
     for c in df.columns:
-        if c in _NON_FEATURES or c in exclude or (not _isnum(df[c])):
+        if c in _NON_FEATURES or c in exclude or (not _isnum(df[c])) or NON_TRANSFERABLE.match(str(c)):
             continue
         if c.endswith(("_valid", "_measured", "_sd_valid")) or c.startswith(("pred", "biomass", "height_cm", "ruler", "dm_", "fresh_", "valid_")):
             continue
@@ -82,15 +82,23 @@ def split_blocks(df, feats, vnir_cols=None, rgb_cols=None):
     return dict(lidar=lidar, vnir=vnir, rgb=rgb, bands=bands)
 
 
-def spectra_matrix(spectra_df, min_frac=0.95, excluded=None, bands=None):
+BAND_TRANSFORMS = {"snv": "log10 reflectance + per-plot SNV (illumination-robust; default)",
+                   "raw": "reflectance as measured (keeps absolute brightness; sensitive to illumination differences between flights)"}
+
+
+def spectra_matrix(spectra_df, min_frac=0.95, excluded=None, bands=None, transform="snv"):
     """Mean vegetation spectra table (Plot_ID + one column per wavelength in nm, NaN = unusable band) -> DataFrame
     indexed by Plot_ID of log10 reflectance after per-plot SNV, over the bands usable on >= min_frac of the plots and
     outside the excluded ranges; remaining NaN cells are filled with the band median over plots.
     bands: explicit band list (sb_<nm> or <nm> names, e.g. the bands a saved model was trained on) - the usability and
     exclusion filters are then skipped so the matrix has exactly those columns, SNV is taken over them as in training,
     a band unusable on every plot (or absent from the table) is set to 0 (the SNV mean); such bands are listed in
-    .attrs["filled_bands"]."""
+    .attrs["filled_bands"].
+    transform: "snv" (log10 + per-plot SNV, the default) or "raw" (reflectance 0-1 as measured; NaN cells take the band
+    median over plots). A model must be applied with the transform it was trained with (stored as "band_transform")."""
     import pandas as pd
+    if transform not in BAND_TRANSFORMS:
+        raise ValueError(f"unknown band transform {transform!r}")
     if excluded is None:
         from .spectral_indices import DEFAULT_EXCLUDED_NM
         excluded = DEFAULT_EXCLUDED_NM
@@ -117,14 +125,16 @@ def spectra_matrix(spectra_df, min_frac=0.95, excluded=None, bands=None):
         X = X[:, ok]; cols = [str(c) for c in np.array(wcols)[ok]]
     if np.isfinite(X).any() and np.nanmax(X) > 1.5:                       # reflectance x 10000 -> reflectance
         X = X / 10000.0
-    X = np.log10(np.clip(X, 1e-4, None))
-    mu = np.nanmean(X, 1, keepdims=True); sd = np.nanstd(X, 1, keepdims=True) + 1e-9
-    X = (X - mu) / sd                                                    # SNV per plot on its valid bands
+    if transform == "snv":
+        X = np.log10(np.clip(X, 1e-4, None))
+        mu = np.nanmean(X, 1, keepdims=True); sd = np.nanstd(X, 1, keepdims=True) + 1e-9
+        X = (X - mu) / sd                                                # SNV per plot on its valid bands
     empty = ~np.isfinite(X).any(0)                                       # band unusable on every plot
     med = np.where(empty, 0.0, np.nanmedian(np.where(empty[None, :], 0.0, X), 0))
     X = np.where(np.isfinite(X), X, med[None, :])
     out = pd.DataFrame(X, index=S.index, columns=[f"{SB_PREFIX}{c}" for c in cols])
     out.attrs["filled_bands"] = [f"{SB_PREFIX}{c}" for c, e in zip(cols, empty) if e]
+    out.attrs["band_transform"] = transform
     return out
 
 
