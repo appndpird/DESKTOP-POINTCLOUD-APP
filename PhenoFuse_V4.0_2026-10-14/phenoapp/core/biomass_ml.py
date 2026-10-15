@@ -28,7 +28,7 @@ Public API
 ----------
 FAMILIES, LEARNERS, FAMILY_MODALITIES, families_for(modalities), feature_family(df, family, ...)
 ground_truth_kg_ha(gt, target, unit, area_by_plot) -> (gt, target_col, unit_label)
-fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_select=12, ...)
+fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_select=12 (0 = no selection), ...)
     -> (results list, predictions DataFrame, fitted {(family, learner): (model, feats)})
 results_table(results)
 save_model / load_model / apply_model
@@ -60,9 +60,12 @@ WEIGHTED = {"NDRE740_veg_x_cover": ("NDRE740_veg", "cover_5cm"), "OSAVI_veg_x_co
             "NDVI_nb_veg_x_cover": ("NDVI_nb_veg", "cover_5cm"), "NDRE740_veg_x_H95": ("NDRE740_veg", "H95"), "OSAVI_veg_x_H95": ("OSAVI_veg", "H95"),
             "REP_veg_x_H95": ("REP_veg", "H95"), "LCI_veg_x_H95": ("LCI_veg", "H95"), "NDRE_x_PVI": ("NDRE740_veg", "PVI_m"),
             "rgb_ExG_veg_x_H95": ("rgb_ExG_veg", "H95"), "rgb_cover_x_H95": ("rgb_cover", "H95")}
-FAMILIES = ["Simple_linear", "LiDAR_core", "VNIR_core", "RGB_core", "Fused_core", "LiDAR+RGB_core", "VNIR+RGB_core", "Fused3_core", "Fused_all"] + PCA_FAMILIES
+ALL_FAMILIES = ["LiDAR_all", "VNIR_all", "RGB_all", "Fused_all", "LiDAR+RGB_all", "VNIR+RGB_all", "Fused3_all"]
+FAMILIES = ["Simple_linear", "LiDAR_core", "VNIR_core", "RGB_core", "Fused_core", "LiDAR+RGB_core", "VNIR+RGB_core", "Fused3_core"] + ALL_FAMILIES + PCA_FAMILIES
 FAMILY_MODALITIES = {"Simple_linear": set(), "LiDAR_core": {"lidar"}, "VNIR_core": {"vnir"}, "RGB_core": {"rgb"}, "Fused_core": {"lidar", "vnir"},
-                     "LiDAR+RGB_core": {"lidar", "rgb"}, "VNIR+RGB_core": {"vnir", "rgb"}, "Fused3_core": {"lidar", "vnir", "rgb"}, "Fused_all": set(),
+                     "LiDAR+RGB_core": {"lidar", "rgb"}, "VNIR+RGB_core": {"vnir", "rgb"}, "Fused3_core": {"lidar", "vnir", "rgb"},
+                     "LiDAR_all": {"lidar"}, "VNIR_all": {"vnir"}, "RGB_all": {"rgb"}, "Fused_all": {"lidar", "vnir"},
+                     "LiDAR+RGB_all": {"lidar", "rgb"}, "VNIR+RGB_all": {"vnir", "rgb"}, "Fused3_all": {"lidar", "vnir", "rgb"},
                      "LiDAR_PCA": {"lidar"}, "VNIR_PCA": {"vnir"}, "RGB_PCA": {"rgb"}, "Fused_PCA": {"lidar", "vnir"}, "Fused_PCA_joint": {"lidar", "vnir"},
                      "LiDAR+RGB_PCA": {"lidar", "rgb"}, "VNIR+RGB_PCA": {"vnir", "rgb"}, "Fused3_PCA": {"lidar", "vnir", "rgb"},
                      "VNIR_bands_PCA": {"vnir"}, "Fused_bands_PCA": {"lidar", "vnir"}}
@@ -75,7 +78,13 @@ FAMILY_TIPS = {
     "LiDAR+RGB_core": "LiDAR core + RGB core (+ ExG x H95, RGB cover x H95); selection inside each fold.",
     "VNIR+RGB_core": "VNIR core + RGB core; selection inside each fold.",
     "Fused3_core": "LiDAR + VNIR + RGB cores + weighted indices; selection inside each fold.",
-    "Fused_all": "Every available column of the ticked modalities; selection inside each fold.",
+    "LiDAR_all": "Every usable LiDAR column (v2 + v3 metrics, ~110 features) - not just the curated core; top-k selection inside each fold, or all of them when 'features kept' = all.",
+    "VNIR_all": "Every usable VNIR column (~150 indices / shape features, plus the reflectance bands per the VNIR mode); selection inside each fold, or all when 'features kept' = all.",
+    "RGB_all": "Every usable rgb_* column (~50); selection inside each fold, or all when 'features kept' = all.",
+    "Fused_all": "Every usable LiDAR + VNIR column + the weighted indices; selection inside each fold, or all when 'features kept' = all.",
+    "LiDAR+RGB_all": "Every usable LiDAR + RGB column (+ RGB x H95 weighted); selection inside each fold, or all when 'features kept' = all.",
+    "VNIR+RGB_all": "Every usable VNIR + RGB column; selection inside each fold, or all when 'features kept' = all.",
+    "Fused3_all": "Every usable LiDAR + VNIR + RGB column + weighted indices; selection inside each fold, or all when 'features kept' = all.",
     "LiDAR_PCA": "PCA family: every finite LiDAR feature standardised and reduced to the components holding 95 % of the variance (fitted inside each fold); no selection.",
     "VNIR_PCA": "PCA family: every finite VNIR feature (indices, bands or both per the VNIR mode) -> PCA (95 % variance) inside each fold.",
     "RGB_PCA": "PCA family: every finite rgb_* feature -> PCA (95 % variance) inside each fold.",
@@ -169,13 +178,17 @@ def feature_family(df, family, exclude=(), vnir_cols=None, rgb_cols=None, vnir_m
         return _available(vnir_core + rgb_core, d)
     if family == "Fused3_core":
         return _available(lidar_core + vnir_core + rgb_core + w, d)
-    if family == "Fused_all":
-        mods = {m.lower() for m in (modalities or ("lidar", "vnir", "rgb"))}
+    ALL_SETS = {"LiDAR_all": {"lidar"}, "VNIR_all": {"vnir"}, "RGB_all": {"rgb"}, "Fused_all": {"lidar", "vnir"}, "LiDAR+RGB_all": {"lidar", "rgb"},
+                "VNIR+RGB_all": {"vnir", "rgb"}, "Fused3_all": {"lidar", "vnir", "rgb"}}
+    if family in ALL_SETS or family == "All_ticked":
+        # every usable column of the modalities (All_ticked: the ticked ones - used for the feature ranking)
+        mods = ALL_SETS.get(family) or {m.lower() for m in (modalities or ("lidar", "vnir", "rgb"))}
         cols = []
         if "lidar" in mods: cols += b["lidar"]
         if "vnir" in mods: cols += vnir_block(b, vnir_mode)
         if "rgb" in mods: cols += b["rgb"]
-        cols += [k for k in w if k not in cols]
+        if "lidar" in mods and "vnir" in mods: cols += [k for k in w if not k.startswith("rgb_") and k not in cols]
+        if "lidar" in mods and "rgb" in mods: cols += [k for k in w if k.startswith("rgb_") and k not in cols]
         return _available(cols, d)
     if family == "LiDAR_height_core":
         return _available(LIDAR_V3_CORE, d)
@@ -197,7 +210,7 @@ def make_learner(name, nfeat, scale_y=1.0):
     if name == "Ridge":
         return make_pipeline(StandardScaler(), RidgeCV(alphas=np.logspace(-2, 3, 30)))
     if name == "PLS":
-        return GridSearchCV(make_pipeline(StandardScaler(), PLSRegression(scale=False)), {"plsregression__n_components": list(range(1, min(8, nfeat) + 1))}, cv=5, scoring="neg_root_mean_squared_error")
+        return GridSearchCV(make_pipeline(StandardScaler(), PLSRegression(scale=False)), {"plsregression__n_components": list(range(1, min(12, nfeat) + 1))}, cv=5, scoring="neg_root_mean_squared_error")
     if name == "SVR_rbf":
         eps = [0.05 * scale_y, 0.15 * scale_y, 0.3 * scale_y]; C = [1 * scale_y, 3 * scale_y, 10 * scale_y, 30 * scale_y]
         return GridSearchCV(make_pipeline(StandardScaler(), SVR()), {"svr__C": C, "svr__epsilon": eps, "svr__gamma": ["scale", 0.03]}, cv=5, scoring="neg_root_mean_squared_error")
@@ -380,7 +393,8 @@ def fit_trait_models(df, gt, target_col, families, learners, cv="rkf10", n_selec
         else:
             feats, blocks = feature_family(dm, fam, exclude=(target_col,), vnir_cols=vnir_cols, rgb_cols=rgb_cols, vnir_mode=vnir_mode, modalities=modalities), None
         X = dm[feats].astype(float).fillna(dm[feats].astype(float).median()).to_numpy() if feats else None
-        k = None if is_pca else (n_select if len(feats) > n_select + 3 else None)      # PCA families: no selection, the PCA is the reduction
+        # PCA families: no selection, the PCA is the reduction; n_select 0 = keep every feature (no selection)
+        k = None if (is_pca or not n_select) else (n_select if len(feats) > n_select + 3 else None)
         for ln in learners:
             done += 1
             if not learner_available(ln) or not feats:

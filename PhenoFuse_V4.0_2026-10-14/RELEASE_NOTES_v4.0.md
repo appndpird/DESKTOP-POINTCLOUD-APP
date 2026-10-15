@@ -30,6 +30,12 @@
   "Band values": `snv` (log10 reflectance + per-plot SNV, the default, illumination-robust) or `raw` (the mean
   vegetation reflectance of `vnir_spectra.csv` as measured, keeps the absolute level). Every saved model records its
   choice (`band_transform`) and prediction rebuilds the bands the same way; the pretrained-model description shows it.
+- **Use most of the features, not only the curated cores.** Biomass Models: new families `LiDAR_all`, `VNIR_all`, `RGB_all`,
+  `Fused_all` (LiDAR+VNIR), `LiDAR+RGB_all`, `VNIR+RGB_all`, `Fused3_all` = every usable column of those modalities (on the
+  Muresk flight: 110 LiDAR, 152 VNIR, 53 RGB columns, plus the bands per the VNIR mode). Height Models: `*_all_*` models
+  (LiDAR / VNIR / RGB / fused, Ridge / PLS / RF / GPR) on the same full column sets. "Features kept" is now on both panels
+  and accepts 0 = all (no selection), so the learner sees every feature; otherwise the random-forest top-k selection runs
+  inside each fold as before. The PCA families remain the compressed way to use everything.
 - The false "input feature(s) missing" warning for band features is gone (the bands come from `vnir_spectra.csv`,
   not from the feature table).
 

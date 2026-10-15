@@ -89,7 +89,7 @@ class _TrainWorker(QThread):
                 try:
                     from sklearn.ensemble import RandomForestRegressor
                     d = add_weighted(df).merge(gt2[["Plot_ID", tcol]].dropna(), on="Plot_ID")
-                    cols = feature_family(d, "Fused_all", exclude=(tcol,), vnir_cols=t["vnir_cols"], rgb_cols=t["rgb_cols"], vnir_mode=o["vnir_mode"], modalities=o["modalities"])
+                    cols = feature_family(d, "All_ticked", exclude=(tcol,), vnir_cols=t["vnir_cols"], rgb_cols=t["rgb_cols"], vnir_mode=o["vnir_mode"], modalities=o["modalities"])
                     X = d[cols].astype(float).fillna(d[cols].astype(float).median()).to_numpy(); y = d[tcol].to_numpy(float)
                     rf = RandomForestRegressor(n_estimators=800, min_samples_leaf=4, random_state=0, n_jobs=-1).fit(X, y)
                     top = pd.DataFrame({"feature": cols, "rf_importance": rf.feature_importances_, "r_with_target": [np.corrcoef(X[:, i], y)[0, 1] for i in range(len(cols))]}).sort_values("rf_importance", ascending=False)
@@ -98,7 +98,7 @@ class _TrainWorker(QThread):
                     toptxt = f"\n(top-feature ranking failed: {e})"
                 ok = [r for r in results if r.get("status") == "ok" and r.get("cv")]
                 best = min(ok, key=lambda r: r["cv"]["RMSE"]) if ok else None
-                txt = f"Target: {tcol}" + (f" ({unit_label})" if unit_label else "") + f"; flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}" + (f" (bands: {o['band_transform']})" if o['vnir_mode'] != 'indices' else "") + f"; validation: {CV_LABELS[o['cv']]}\n\n"
+                txt = f"Target: {tcol}" + (f" ({unit_label})" if unit_label else "") + f"; flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}" + (f" (bands: {o['band_transform']})" if o['vnir_mode'] != 'indices' else "") + f"; validation: {CV_LABELS[o['cv']]}; features kept: {o['n_select'] or 'all'}\n\n"
                 txt += results_table(results) + toptxt
                 if best:
                     txt += f"\n\nBest by held-out RMSE: {best['family']} / {best['learner']}: R2 {best['cv']['R2']:.3f}, RMSE {best['cv']['RMSE']:.3g}, accuracy {best['cv']['accuracy']:.1f}%\nFeatures: {', '.join(best['features'])}"
@@ -116,7 +116,7 @@ class _TrainWorker(QThread):
                     raise RuntimeError("no ground truth")
                 results, pred, fitted = fit_height_models(df, gt, o["keys"], cv=o["cv"], progress_cb=cb, groups=t["groups"], spectra=t["spectra"],
                                                           vnir_cols=t["vnir_cols"], rgb_cols=t["rgb_cols"], vnir_mode=o["vnir_mode"], excluded=t.get("excluded"),
-                                                          band_transform=o["band_transform"])
+                                                          band_transform=o["band_transform"], n_select=o["n_select"])
                 pred.to_csv(os.path.join(run_dir, "predictions.csv"), index=False)
                 saved = {}
                 from phenoapp.core.height_models import prepare_features
@@ -136,7 +136,7 @@ class _TrainWorker(QThread):
                     json.dump({"cv": o["cv"], "n_plots": int(len(pred)), "results": results, "models": saved, "flights": t["flights"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "band_transform": o["band_transform"]}, f, indent=1, default=float)
                 ok = [r for r in results if r.get("status") == "ok" and r.get("cv")]
                 best = min(ok, key=lambda r: r["cv"]["rmse"]) if ok else None
-                txt = f"Flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}" + (f" (bands: {o['band_transform']})" if o['vnir_mode'] != 'indices' else "") + f"; validation: {CV_LABELS[o['cv']]}\n\n" + results_table(results)
+                txt = f"Flights: {', '.join(t['flights'])}; modalities: {'+'.join(o['modalities'])}; VNIR input: {o['vnir_mode']}" + (f" (bands: {o['band_transform']})" if o['vnir_mode'] != 'indices' else "") + f"; validation: {CV_LABELS[o['cv']]}; features kept: {o['n_select'] or 'all'}\n\n" + results_table(results)
                 txt += (f"\n\nColumn guide: cv* = every plot predicted by a model that never saw it; fit* = in-sample. Compare cvRMSE with the SD of the measured "
                         "heights: equal means no skill. Slope near 1 means the model tracks plot differences one for one.")
                 if best:
@@ -146,7 +146,7 @@ class _TrainWorker(QThread):
                         c = r["calibration"]; txt += f"\nCalibration line ({r['key']}): height_cm = {c['intercept_cm']:.2f} + {c['slope']:.3f} x {c['predictor']}_cm"
                 if ens:
                     txt += "\n\nTop-three mean ensemble saved (top3_ensemble.joblib): " + ", ".join(m["family"] for m in ens["members"])
-            save_run_meta(run_dir, kind=self.kind, flights=t["flights"], modalities=o["modalities"], vnir_mode=o["vnir_mode"], band_transform=o["band_transform"], cv=o["cv"],
+            save_run_meta(run_dir, kind=self.kind, flights=t["flights"], modalities=o["modalities"], vnir_mode=o["vnir_mode"], band_transform=o["band_transform"], n_select=o["n_select"], cv=o["cv"],
                           n_rows=int(len(df)), options={k: v for k, v in o.items() if k not in ("families", "learners", "keys")}, families=o.get("families"), learners=o.get("learners"), keys=o.get("keys"))
             txt += f"\n\nRun folder -> {run_dir}\n  predictions.csv, results.json, run.json, {len(saved)} model files" + (", top3_ensemble.joblib" if ens else "")
             self.progress.emit(100, "done"); self.done_ok.emit(txt)
@@ -194,10 +194,13 @@ class TrainPanel(QWidget):
         self.cb_cv = QComboBox()
         for k in ("rkf10", "kfold5", "loo", "none"):
             self.cb_cv.addItem(CV_LABELS[k], k)
-        self.sp_sel = QSpinBox(); self.sp_sel.setRange(3, 60); self.sp_sel.setValue(12); self.sp_sel.setToolTip("Features kept per training fold (random-forest importance inside the fold); families with fewer features use all.")
+        self.sp_sel = QSpinBox(); self.sp_sel.setRange(0, 400); self.sp_sel.setValue(12 if self.kind == "biomass" else 10); self.sp_sel.setSpecialValueText("all (no selection)")
+        self.sp_sel.setToolTip("Features kept per training fold by the selection families / models (random-forest importance computed inside the fold, so "
+                               "the held-out plots never influence the choice); families with fewer features use all of them. Set to 0 = 'all (no selection)' "
+                               "to feed every feature of the family to the learner (Ridge / PLS / GPR handle that; random forest too). The *_all families "
+                               "(every usable column of a modality) and the PCA families are the ways to use most of the features rather than the curated cores.")
         row = QHBoxLayout(); row.addWidget(self.cb_cv, stretch=3)
-        if self.kind == "biomass":
-            row.addWidget(QLabel("features kept:")); row.addWidget(self.sp_sel)
+        row.addWidget(QLabel("features kept:")); row.addWidget(self.sp_sel)
         f.addRow("Validation:", row)
         self.ed_run = QLineEdit(); self.ed_run.setPlaceholderText("optional run name (folder: <date_time>_<name>_<modalities> under Models/)")
         f.addRow("Run name:", self.ed_run)

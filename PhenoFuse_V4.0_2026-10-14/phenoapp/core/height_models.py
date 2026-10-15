@@ -58,6 +58,21 @@ HEIGHT_MODELS = {
     "fused_v3_rf":    ("v3 LiDAR + VNIR - Random forest, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE, "rf_sel"),
     "lidar_rgb_gpr":  ("v3 LiDAR + RGB - Gaussian process, nested selection", LIDAR_V3_CORE + RGB_CORE, "gpr_sel"),
     "fused3_ridge":   ("v3 LiDAR + VNIR + RGB - Ridge, nested selection", LIDAR_V3_CORE + VNIR_V3_CORE + RGB_CORE, "ridge_sel"),
+    "lidar_all_ridge":  ("ALL LiDAR features (every usable column) - Ridge, selection per 'features kept'", "ALL:lidar", "ridge_sel"),
+    "lidar_all_pls":    ("ALL LiDAR features - PLS, selection per 'features kept'", "ALL:lidar", "pls_sel"),
+    "lidar_all_rf":     ("ALL LiDAR features - Random forest, selection per 'features kept'", "ALL:lidar", "rf_sel"),
+    "lidar_all_gpr":    ("ALL LiDAR features - Gaussian process, selection per 'features kept'", "ALL:lidar", "gpr_sel"),
+    "vnir_all_ridge":   ("ALL VNIR features (indices / bands per the VNIR mode) - Ridge, selection per 'features kept'", "ALL:vnir", "ridge_sel"),
+    "vnir_all_pls":     ("ALL VNIR features - PLS, selection per 'features kept'", "ALL:vnir", "pls_sel"),
+    "rgb_all_ridge":    ("ALL RGB features - Ridge, selection per 'features kept'", "ALL:rgb", "ridge_sel"),
+    "rgb_all_pls":      ("ALL RGB features - PLS, selection per 'features kept'", "ALL:rgb", "pls_sel"),
+    "fused_all_ridge":  ("ALL LiDAR + VNIR features - Ridge, selection per 'features kept'", "ALL:fused", "ridge_sel"),
+    "fused_all_pls":    ("ALL LiDAR + VNIR features - PLS, selection per 'features kept'", "ALL:fused", "pls_sel"),
+    "fused_all_rf":     ("ALL LiDAR + VNIR features - Random forest, selection per 'features kept'", "ALL:fused", "rf_sel"),
+    "lidar_rgb_all_ridge": ("ALL LiDAR + RGB features - Ridge, selection per 'features kept'", "ALL:lidar_rgb", "ridge_sel"),
+    "vnir_rgb_all_ridge":  ("ALL VNIR + RGB features - Ridge, selection per 'features kept'", "ALL:vnir_rgb", "ridge_sel"),
+    "fused3_all_ridge": ("ALL LiDAR + VNIR + RGB features - Ridge, selection per 'features kept'", "ALL:fused3", "ridge_sel"),
+    "fused3_all_rf":    ("ALL LiDAR + VNIR + RGB features - Random forest, selection per 'features kept'", "ALL:fused3", "rf_sel"),
     "lidar_v3_pca_ridge":      ("LiDAR PCA (all LiDAR features -> PCA 95 %) - Ridge", "PCA:lidar", "pca_ridge"),
     "lidar_v3_pca_gpr":        ("LiDAR PCA - Gaussian process", "PCA:lidar", "pca_gpr"),
     "vnir_pca_ridge":          ("VNIR PCA (indices / bands per the VNIR mode) - Ridge", "PCA:vnir", "pca_ridge"),
@@ -77,7 +92,11 @@ HEIGHT_MODEL_MODALITIES = {
     "cal_linear": {"lidar"}, "cal_linear_H95": {"lidar"}, "struct_ridge": {"lidar"}, "struct_rf": {"lidar"}, "struct_xgb": {"lidar"},
     "lidar_v3_pls": {"lidar"}, "lidar_v3_ridge": {"lidar"}, "lidar_v3_gpr": {"lidar"}, "vnir_v3_pls": {"vnir"}, "rgb_pls": {"rgb"},
     "fused_v3_pls": {"lidar", "vnir"}, "fused_v3_ridge": {"lidar", "vnir"}, "fused_v3_rf": {"lidar", "vnir"}, "lidar_rgb_gpr": {"lidar", "rgb"},
-    "fused3_ridge": {"lidar", "vnir", "rgb"}, "lidar_v3_pca_ridge": {"lidar"}, "lidar_v3_pca_gpr": {"lidar"}, "vnir_pca_ridge": {"vnir"},
+    "fused3_ridge": {"lidar", "vnir", "rgb"},
+    "lidar_all_ridge": {"lidar"}, "lidar_all_pls": {"lidar"}, "lidar_all_rf": {"lidar"}, "lidar_all_gpr": {"lidar"}, "vnir_all_ridge": {"vnir"}, "vnir_all_pls": {"vnir"},
+    "rgb_all_ridge": {"rgb"}, "rgb_all_pls": {"rgb"}, "fused_all_ridge": {"lidar", "vnir"}, "fused_all_pls": {"lidar", "vnir"}, "fused_all_rf": {"lidar", "vnir"},
+    "lidar_rgb_all_ridge": {"lidar", "rgb"}, "vnir_rgb_all_ridge": {"vnir", "rgb"}, "fused3_all_ridge": {"lidar", "vnir", "rgb"}, "fused3_all_rf": {"lidar", "vnir", "rgb"},
+    "lidar_v3_pca_ridge": {"lidar"}, "lidar_v3_pca_gpr": {"lidar"}, "vnir_pca_ridge": {"vnir"},
     "rgb_pca_ridge": {"rgb"}, "bands_pca_ridge": {"vnir"}, "fused_v3_pca_ridge": {"lidar", "vnir"}, "fused_v3_pca_gpr": {"lidar", "vnir"},
     "fused_v3_pca_rf": {"lidar", "vnir"}, "fused_v3_pcajoint_ridge": {"lidar", "vnir"}, "fused_bands_pca_gpr": {"lidar", "vnir"},
     "lidar_rgb_pca_ridge": {"lidar", "rgb"}, "vnir_rgb_pca_ridge": {"vnir", "rgb"}, "fused3_pca_ridge": {"lidar", "vnir", "rgb"}, "fused3_pca_gpr": {"lidar", "vnir", "rgb"}}
@@ -188,7 +207,8 @@ class _SelWrap:
         return self
 
 
-def _make(learner, feats):
+def _make(learner, feats, n_select=10):
+    """n_select: features kept by the *_sel learners (random-forest top-k inside the fold); 0 = keep every feature."""
     from sklearn.pipeline import make_pipeline
     if learner.endswith("_sel"):
         from sklearn.cross_decomposition import PLSRegression
@@ -198,8 +218,8 @@ def _make(learner, feats):
         from sklearn.gaussian_process import GaussianProcessRegressor
         from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
         from sklearn.ensemble import RandomForestRegressor
-        k = min(10, len(feats))
-        base = {"pls_sel": GridSearchCV(make_pipeline(_SS(), PLSRegression(scale=False)), {"plsregression__n_components": list(range(1, min(9, k + 1)))}, cv=5, scoring="neg_root_mean_squared_error"),
+        k = len(feats) if not n_select else min(int(n_select), len(feats))
+        base = {"pls_sel": GridSearchCV(make_pipeline(_SS(), PLSRegression(scale=False)), {"plsregression__n_components": list(range(1, min(12, k) + 1))}, cv=5, scoring="neg_root_mean_squared_error"),
                 "ridge_sel": make_pipeline(_SS(), _R(alphas=np.logspace(-2, 3, 30))),
                 "gpr_sel": make_pipeline(_SS(), GaussianProcessRegressor(ConstantKernel() * RBF(np.ones(k) * 3.0) + WhiteKernel(1.0), normalize_y=True, n_restarts_optimizer=2, random_state=0)),
                 "rf_sel": RandomForestRegressor(n_estimators=500, min_samples_leaf=4, max_features=0.5, random_state=0, n_jobs=-1)}[learner]
@@ -230,8 +250,9 @@ def _metrics(pred, y):
 
 
 def fit_height_models(df, gt, keys, cv: str = "rkf10", progress_cb=None, vnir_df=None, rgb_df=None, groups=None, spectra=None,
-                      vnir_cols=None, rgb_cols=None, vnir_mode="indices", excluded=None, band_transform="snv"):
+                      vnir_cols=None, rgb_cols=None, vnir_mode="indices", excluded=None, band_transform="snv", n_select=10):
     """Fit + validate the chosen models. band_transform: "snv" | "raw" for the reflectance band columns.
+    n_select: features kept per fold by the nested-selection models (0 = all features, no selection).
 
     df      : feature table (Plot_ID + LiDAR features; VNIR / RGB may already be merged or given as vnir_df / rgb_df)
     gt      : DataFrame Plot_ID + height column (cm, or m if the name ends in _m / values < 5)
@@ -274,6 +295,10 @@ def fit_height_models(df, gt, keys, cv: str = "rkf10", progress_cb=None, vnir_df
             feats, blocks = _pca_feature_set(feats[4:], m, vnir_df, rgb_df, vnir_cols, rgb_cols, vnir_mode)
             if not feats:
                 results.append(dict(key=k, label=label, status="skipped - no usable features for this PCA set (needs the VNIR / RGB features or the spectra table)")); continue
+        elif isinstance(feats, str) and feats.startswith("ALL:"):
+            feats, _ = _pca_feature_set(feats[4:], m, vnir_df, rgb_df, vnir_cols, rgb_cols, vnir_mode)   # same column sets, used directly
+            if not feats:
+                results.append(dict(key=k, label=label, status="skipped - no usable features for this set (needs the VNIR / RGB features or the spectra table)")); continue
         else:
             feats = list(feats)
         miss = [f for f in feats if f not in m.columns]
@@ -295,7 +320,7 @@ def fit_height_models(df, gt, keys, cv: str = "rkf10", progress_cb=None, vnir_df
         if not np.isfinite(X).all():
             X = np.where(np.isfinite(X), X, np.nanmedian(X, axis=0))
         sp = splits if sel.all() else make_splits(len(ym), cv, grp[sel] if grp is not None else None)
-        model = make_pca_learner(_PCA_LEARNER[learner], pca_preprocessor(blocks)) if blocks is not None else _make(learner, feats)
+        model = make_pca_learner(_PCA_LEARNER[learner], pca_preprocessor(blocks)) if blocks is not None else _make(learner, feats, n_select)
         fit_model = clone(model).fit(X, ym)
         pfit = np.asarray(fit_model.predict(X)).ravel()
         res = dict(key=k, label=label, n=int(len(ym)), features=feats, status="ok", fit=_metrics(pfit, ym), family=k, learner=learner)

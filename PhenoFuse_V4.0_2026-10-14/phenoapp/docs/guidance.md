@@ -129,6 +129,12 @@ numbers on a new flight, read the notes under the prediction:
   That is the growth-stage signature: a maturity model applied to an anthesis flight sees a green canopy (CIRE, NDRE,
   OSAVI several times higher) and extrapolates (the Muresk maturity VNIR ensemble predicts ~20 t/ha at anthesis).
   Use a model trained at the same stage, or train from scratch on this flight / a dataset of similar flights.
+- **Curated core, all features, or PCA?** Three ways to feed a modality: the *_core families (12-30 curated
+  features, the research setting), the *_all families / *_all_* height models (every usable column: ~110 LiDAR, ~150
+  VNIR, ~50 RGB, plus bands) with "features kept" = top-k per fold or 0 = all, and the PCA families (every column
+  compressed to the components holding 95 % of the variance). With 128 plots, all-features Ridge / PLS usually match
+  the cores and random forest likes the extra columns; compare on the same validation and keep the simplest model
+  that wins.
 - **Raw bands or SNV bands?** "Band values" on the training panels: `snv` removes each plot's overall brightness
   (log10 + standard normal variate), so a model transfers better between flights and sun angles; `raw` keeps the
   absolute reflectance, which can add cover / biomass signal within one flight but drifts between flights. Train both
