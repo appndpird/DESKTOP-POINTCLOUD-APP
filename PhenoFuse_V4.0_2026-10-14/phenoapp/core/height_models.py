@@ -368,6 +368,7 @@ def apply_height_model(df, saved, offset_cm: float = 0.0, vnir_df=None, spectra=
         out.insert(1, "cth_p95_cm", d["cth_p95"].values)
     out.attrs["filled_bands"] = filled; out.attrs["filled_features"] = filled_feats; out.attrs["replaced_features"] = replaced
     out.attrs["unusable_features"] = [f for f in need if f in d.columns and not f.startswith("sb_") and d[f].isna().all()]
+    out.attrs["missing_features"] = [f for f in dict.fromkeys(need) if f not in d.columns]
     out.attrs["out_of_range"] = range_check(saved, d, [f for f in need if f not in replaced])
     out.attrs["n_range_checked"] = len([f for f in dict.fromkeys(need) if f in saved.get("feature_ranges", {})]) if isinstance(saved, dict) else 0
     return out

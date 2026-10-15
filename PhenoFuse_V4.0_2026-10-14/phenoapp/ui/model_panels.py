@@ -388,8 +388,9 @@ class PretrainedPanel(QWidget):
             outp = os.path.join(out_dir, f"{flight}_{tgt}_pred_{_basename_key(p)}" + (f"_{folds}" if is_fold_ensembles(saved) else "") + ".csv")
             txt = f"Applied {os.path.basename(p)} ({describe(saved, folds)}) to {flight} with offset {self.sp_off.value():+g}\n"
             v = out[col].dropna(); txt += f"{int(out.model_ok.sum())}/{len(out)} plots predicted; mean {v.mean():.4g}, SD {v.std():.4g}, min {v.min():.4g}, max {v.max():.4g}\n"
-            has_spectra = t.get("spectra") is not None
-            missing = [f for f in required_features(saved, folds) if f not in df.columns and not (f.startswith("sb_") and has_spectra)]
+            # missing = not in the prepared table (derived columns such as the weighted VNIR x cover features, tip_thin / vspread
+            # and the reflectance bands are built inside apply_*; a band model without a spectra table shows its sb_ bands here)
+            missing = list(getattr(out, "attrs", {}).get("missing_features", []))
             if missing:
                 txt += f"WARNING: {len(missing)} input feature(s) missing from this flight's tables: {', '.join(missing[:8])}\n"
             attrs = getattr(out, "attrs", {})

@@ -459,6 +459,7 @@ def apply_model(df, saved, offset=0.0, spectra=None, folds="all", excluded=None)
         out = pd.DataFrame({"Plot_ID": d.Plot_ID, "predicted": p, "model_ok": ok.astype(int)})
     out.attrs["filled_bands"] = filled; out.attrs["filled_features"] = filled_feats; out.attrs["replaced_features"] = replaced
     out.attrs["unusable_features"] = [f for f in feats if f in d.columns and not f.startswith("sb_") and d[f].isna().all()]
+    out.attrs["missing_features"] = [f for f in dict.fromkeys(feats) if f not in d.columns]
     out.attrs["out_of_range"] = range_check(saved, d, [f for f in feats if f not in replaced])
     out.attrs["n_range_checked"] = len([f for f in dict.fromkeys(feats) if f in saved.get("feature_ranges", {})]) if isinstance(saved, dict) else 0
     return out

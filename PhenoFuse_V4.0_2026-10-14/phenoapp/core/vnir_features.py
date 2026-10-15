@@ -28,8 +28,8 @@ DEFAULT_V3_INDICES = ["NDVI_nb", "NDRE740", "NDRE720", "NDREI", "REP", "S2REP", 
                       # water / plant-water indices computable on 400-1000 nm (PhenoFuse 4.0)
                       "NDWI", "WI_NDVI", "NWI_1", "NWI_3", "DDWI", "NDCI", "FWEI"]
 VNIR_V3_CORE = ["NDRE740_veg", "NDRE720_veg", "REP_veg", "LCI_veg", "MTCI_veg", "CIRE_veg", "NDVI_nb_veg", "OSAVI_veg", "GNDVI_veg", "kNDVI_veg",
-                "NIRv_veg", "PRI_veg", "WBI_veg", "fcover_vnir", "refl_N", "refl_RE1", "refl_R", "red_edge_slope_max", "red_edge_pos_deriv_nm",
-                "spec_pc1", "spec_pc2", "spec_pc3"]
+                "NIRv_veg", "PRI_veg", "WBI_veg", "fcover_vnir", "refl_N", "refl_RE1", "refl_R", "red_edge_slope_max", "red_edge_pos_deriv_nm"]
+# (spec_pc1..3 are still written to the table but are per-flight PCA scores, not model inputs - see pca_families.NON_TRANSFERABLE)
 
 
 def _otsu(v):
