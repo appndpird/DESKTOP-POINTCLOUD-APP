@@ -103,3 +103,22 @@ tall stubble, lower them for short crops at early stages, and keep them identica
 ### Window resize
 Every tab sits in a scroll area, so the window can be dragged from any edge down to 480 x 360 pixels; it opens at 90 % of
 the screen at most.
+
+### Pretrained models on a new flight (4.0.2)
+
+A bundled model was trained on one trial, flight and growth stage (its description names them). Before trusting its
+numbers on a new flight, read the notes under the prediction:
+
+- **Bands filled** - the model uses reflectance bands that are unusable on every plot of this flight (the GRYFN cube
+  clips the blue bands 417-466 nm to zero on some flights). They are set to the SNV mean; predictions lean on the rest.
+- **Features filled with the training median** - an index that needs a clipped band (mND705 uses 445 nm) is NaN on the
+  whole flight; the model's stored training median is used instead.
+- **Spectral PCA scores replaced** - `spec_pc1..5` are per-flight PCA scores whose sign and scale differ between
+  extraction runs; they are never transferable and are not used when training in the app.
+- **Out of training range** - the flight's median of several inputs lies outside the model's training 5-95 % range.
+  That is the growth-stage signature: a maturity model applied to an anthesis flight sees a green canopy (CIRE, NDRE,
+  OSAVI several times higher) and extrapolates (the Muresk maturity VNIR ensemble predicts ~20 t/ha at anthesis).
+  Use a model trained at the same stage, or train from scratch on this flight / a dataset of similar flights.
+- Keep the LiDAR preprocessing the same as the training run: the research models were trained with per-plot noise
+  removal on (rule `sor`); with the noise rule set to `gap` nothing is removed and the density features shift a little.
+

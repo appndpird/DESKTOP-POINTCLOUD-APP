@@ -21,7 +21,7 @@ Public API
 PCA_FAMILIES, PCA_VAR, FAMILY_BLOCKS
 numeric_feature_columns(df, exclude)            finite numeric feature columns of a table
 split_blocks(df, feats, vnir_cols, rgb_cols)    -> dict(lidar, vnir, rgb, bands)
-spectra_matrix(spectra_df, min_frac, excluded)  -> DataFrame Plot_ID-indexed, columns sb_<nm>
+spectra_matrix(spectra_df, min_frac, excluded, bands=None)  -> DataFrame Plot_ID-indexed, columns sb_<nm> (bands= exact list for inference)
 family_inputs(family, df, exclude, vnir_cols, rgb_cols, vnir_mode) -> (columns, blocks)
 pca_preprocessor(blocks)                        ColumnTransformer: StandardScaler -> PCA(0.95) per block
 make_pca_learner(name, pre, scale_y)            pipeline preprocessor -> learner
@@ -43,17 +43,20 @@ FAMILY_BLOCKS = {"LiDAR_PCA": ["lidar"], "VNIR_PCA": ["vnir"], "RGB_PCA": ["rgb"
                  "Fused3_PCA": ["lidar", "vnir", "rgb"], "VNIR_bands_PCA": ["bands"], "Fused_bands_PCA": ["lidar", "bands"]}
 PCA_FAMILIES = list(FAMILY_BLOCKS)
 SB_PREFIX = "sb_"
+# per-flight PCA scores of the spectra (spec_pc1..): sign and scale are arbitrary per extraction run, so they are kept in the
+# tables for within-flight analysis but never used as model inputs; a research model that has them gets its training median
+NON_TRANSFERABLE = re.compile(r"^spec_pc\d+$")
 _NON_FEATURES = {"Plot_ID", "Plot", "B/R", "Bank", "Row", "Range", "Block", "Rep", "region_mode", "region_area_m2", "area_m2", "qc_ok",
                  "vnir_qc_ok", "vnir_reflectance_ok", "red_ok", "ground_source", "n_raw", "n_noise_removed", "ground_cells", "ground_rms_cm",
                  "I_ring_median_raw", "region_px", "frac_in_cube", "veg_ndvi_threshold", "cth_ok", "cth_ground_cells", "cth_n_noise", "n_usable_bands",
                  "cube_reflectance_ok", "noise_rule", "gt_column", "has_ground_truth", "valid_lidar", "valid_vnir", "valid_vnir_lenient", "valid_fused",
                  "flight", "trial", "stage", "Plot_ID_orig", "rgb_qc_ok", "rgb_n_px", "rgb_frac_in_ortho", "rgb_veg_threshold", "Variety", "variety", "_group"}
 _VNIR_NAME = re.compile(r"(_veg$|_veg_sd$|^refl_|^red_depth|^red_edge|^rededge|^REP|^S2REP|^LCI|^MTCI|^CIRE|^CIre|^NDRE|^NDREI|^NDVI|^GNDVI|^kNDVI|"
-                        r"^OSAVI|^SAVI|^NIRv|^WDRVI|^VOG|^MCARI|^TCARI|^WBI|^PRI|^EVI|^MSR|^spec_pc|^pc\d|^fcover_vnir|^veg_frac|^deriv_|^dr_|^log_|^snv_|^sb_|^NDWI|^DDWI|^FWEI|^NDCI|^NDTI|^OSI|^PI$|^RNDVI|^WI_)")
+                        r"^OSAVI|^SAVI|^NIRv|^WDRVI|^VOG|^MCARI|^TCARI|^WBI|^PRI|^EVI|^MSR|^fcover_vnir|^veg_frac|^deriv_|^dr_|^log_|^snv_|^sb_|^NDWI|^DDWI|^FWEI|^NDCI|^NDTI|^OSI|^PI$|^RNDVI|^WI_)")
 
 
 def numeric_feature_columns(df, exclude=(), min_finite=0.95):
-    """Numeric columns that look like features: not bookkeeping, not targets / predictions / QC flags, finite on
+    """Numeric columns that look like features: not bookkeeping, not targets / predictions / QC flags, not spec_pc*, finite on
     >= min_finite of the rows and not constant."""
     cols = []
     for c in df.columns:
@@ -79,10 +82,14 @@ def split_blocks(df, feats, vnir_cols=None, rgb_cols=None):
     return dict(lidar=lidar, vnir=vnir, rgb=rgb, bands=bands)
 
 
-def spectra_matrix(spectra_df, min_frac=0.95, excluded=None):
+def spectra_matrix(spectra_df, min_frac=0.95, excluded=None, bands=None):
     """Mean vegetation spectra table (Plot_ID + one column per wavelength in nm, NaN = unusable band) -> DataFrame
     indexed by Plot_ID of log10 reflectance after per-plot SNV, over the bands usable on >= min_frac of the plots and
-    outside the excluded ranges; remaining NaN cells are filled with the band median over plots."""
+    outside the excluded ranges; remaining NaN cells are filled with the band median over plots.
+    bands: explicit band list (sb_<nm> or <nm> names, e.g. the bands a saved model was trained on) - the usability and
+    exclusion filters are then skipped so the matrix has exactly those columns, SNV is taken over them as in training,
+    a band unusable on every plot (or absent from the table) is set to 0 (the SNV mean); such bands are listed in
+    .attrs["filled_bands"]."""
     import pandas as pd
     if excluded is None:
         from .spectral_indices import DEFAULT_EXCLUDED_NM
@@ -90,22 +97,35 @@ def spectra_matrix(spectra_df, min_frac=0.95, excluded=None):
     S = spectra_df.set_index("Plot_ID")
     wcols = [c for c in S.columns if re.fullmatch(r"[0-9.]+", str(c))]
     S = S[wcols]; wl = np.array([float(c) for c in wcols])
-    ex = np.zeros(len(wl), bool)
-    for lo, hi in excluded:
-        ex |= (wl >= lo) & (wl <= hi)
     X = S.to_numpy(float)
     X = np.where(X > 0, X, np.nan)                                       # clipped / NaN bands are not reflectance
-    ok = (np.isfinite(X).mean(0) >= min_frac) & ~ex
-    if ok.sum() < 3:
-        return pd.DataFrame(index=S.index)
-    X = X[:, ok]
-    if np.nanmax(X) > 1.5:                                                # reflectance x 10000 -> reflectance
+    if bands is not None:
+        want = [str(b)[len(SB_PREFIX):] if str(b).startswith(SB_PREFIX) else str(b) for b in bands]
+        pos = {str(c): i for i, c in enumerate(wcols)}
+        Xw = np.full((X.shape[0], len(want)), np.nan)
+        for j, w in enumerate(want):
+            if w in pos:
+                Xw[:, j] = X[:, pos[w]]
+        X = Xw; cols = want
+    else:
+        ex = np.zeros(len(wl), bool)
+        for lo, hi in excluded:
+            ex |= (wl >= lo) & (wl <= hi)
+        ok = (np.isfinite(X).mean(0) >= min_frac) & ~ex
+        if ok.sum() < 3:
+            return pd.DataFrame(index=S.index)
+        X = X[:, ok]; cols = [str(c) for c in np.array(wcols)[ok]]
+    if np.isfinite(X).any() and np.nanmax(X) > 1.5:                       # reflectance x 10000 -> reflectance
         X = X / 10000.0
     X = np.log10(np.clip(X, 1e-4, None))
     mu = np.nanmean(X, 1, keepdims=True); sd = np.nanstd(X, 1, keepdims=True) + 1e-9
     X = (X - mu) / sd                                                    # SNV per plot on its valid bands
-    X = np.where(np.isfinite(X), X, np.nanmedian(X, 0, keepdims=True))
-    return pd.DataFrame(X, index=S.index, columns=[f"{SB_PREFIX}{c}" for c in np.array(wcols)[ok]])
+    empty = ~np.isfinite(X).any(0)                                       # band unusable on every plot
+    med = np.where(empty, 0.0, np.nanmedian(np.where(empty[None, :], 0.0, X), 0))
+    X = np.where(np.isfinite(X), X, med[None, :])
+    out = pd.DataFrame(X, index=S.index, columns=[f"{SB_PREFIX}{c}" for c in cols])
+    out.attrs["filled_bands"] = [f"{SB_PREFIX}{c}" for c, e in zip(cols, empty) if e]
+    return out
 
 
 def vnir_block(blocks, vnir_mode="indices"):

@@ -32,3 +32,10 @@ feature tables of the flight (this flight or a flight of a dataset) -> Predict. 
 with an offset calibrated on a few measured plots; validate against a measurement taken on the day of the flight.
 Deep Models tab -> "Use a pretrained ensemble" -> weights folder = `Models/<kind>/two_stream` -> prepare the flight's tensors
 -> Predict.
+
+## 2026-10-16 update (PhenoFuse 4.0.2)
+
+Every model file now carries `feature_medians` (medians of its training table) and a `meta` block (target, modalities,
+dataset, flight). At prediction time a feature that is NaN on every plot of a new flight (e.g. `mND705` when the 445 nm
+band is clipped) is filled with its training median, and band models are given exactly their training bands. The
+Muresk maturity biomass ensembles need the `lightgbm` package (4.6.0), which the 4.0.2 executable bundles.

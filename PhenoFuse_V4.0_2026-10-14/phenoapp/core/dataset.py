@@ -194,7 +194,7 @@ def load_training_table(dataset_dir, modalities, flights=None, require_all=True)
                 continue
             t = read_csv(p)
             if m == "vnir":
-                vnir_cols = sorted(set(vnir_cols) | {c for c in t.columns if c != "Plot_ID" and _isnum(t[c])})
+                vnir_cols = sorted(set(vnir_cols) | {c for c in t.columns if c != "Plot_ID" and _isnum(t[c]) and not re.match(r"spec_pc\d+$", c)})
                 if excluded is None:
                     excluded = read_excluded(p)
                 sp = os.path.join(dataset_dir, m, fl, "vnir_spectra.csv")
@@ -241,7 +241,7 @@ def single_flight_table(lidar_csv=None, vnir_csv=None, rgb_csv=None, gt_csv=None
             continue
         t = read_csv(p)
         if m == "vnir":
-            vnir_cols = [c for c in t.columns if c != "Plot_ID" and _isnum(t[c])]
+            vnir_cols = [c for c in t.columns if c != "Plot_ID" and _isnum(t[c]) and not re.match(r"spec_pc\d+$", c)]
             sp = existing(vnir_sidecar(p, "spectra")); spectra = read_csv(sp) if sp else None
             vf = existing(vnir_sidecar(p, "valid_fraction")); valid_fraction = read_csv(vf) if vf else None
             excluded = read_excluded(p)

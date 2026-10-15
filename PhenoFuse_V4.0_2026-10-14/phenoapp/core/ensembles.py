@@ -58,6 +58,71 @@ def required_features(saved, folds="all"):
     return out
 
 
+def fill_missing(saved, d, feats):
+    """NaN cells of the needed (non-band) feature columns of d: first the column median over the plots of this flight,
+    then - for a feature that is NaN on every plot (e.g. an index that needs a band clipped on this sensor) - the
+    training-set median stored in the model under "feature_medians". Flight-specific PCA scores (spec_pc*, whose sign and
+    scale differ between extraction runs) are always replaced by the training median. Returns (d, filled, replaced):
+    filled = features that took the training median because they were NaN everywhere, replaced = the spec_pc* ones;
+    a feature with no stored median stays NaN, so those plots get model_ok = 0."""
+    import pandas as pd
+    from .pca_families import NON_TRANSFERABLE
+    d = d.copy(); filled = []; replaced = []
+    have = list(dict.fromkeys(f for f in feats if f in d.columns and not f.startswith("sb_") and pd.api.types.is_numeric_dtype(d[f])))
+    if have:
+        d[have] = d[have].astype(float).fillna(d[have].astype(float).median())
+    med = saved.get("feature_medians", {}) if isinstance(saved, dict) else {}
+    for f in have:
+        if f in med and med[f] == med[f] and NON_TRANSFERABLE.match(f):
+            d[f] = float(med[f]); replaced.append(f)
+        elif d[f].isna().all() and f in med and med[f] == med[f]:
+            d[f] = float(med[f]); filled.append(f)
+    return d, filled, replaced
+
+
+def feature_medians(table, feats):
+    """{feature: median over the training table} for the numeric non-band features present (stored in saved models)."""
+    import pandas as pd
+    out = {}
+    for f in feats:
+        if f in table.columns and not f.startswith("sb_") and pd.api.types.is_numeric_dtype(table[f]):
+            m = float(table[f].astype(float).median())
+            if m == m:
+                out[f] = m
+    return out
+
+
+def feature_ranges(table, feats):
+    """{feature: [5th, 95th percentile over the training table]} for the numeric non-band features present; stored in
+    saved models so a prediction on a flight outside the training range (another growth stage) can be flagged."""
+    import pandas as pd
+    out = {}
+    for f in feats:
+        if f in table.columns and not f.startswith("sb_") and pd.api.types.is_numeric_dtype(table[f]):
+            v = table[f].astype(float).dropna()
+            if len(v) >= 5:
+                lo, hi = float(v.quantile(0.05)), float(v.quantile(0.95))
+                if lo == lo and hi == hi:
+                    out[f] = [lo, hi]
+    return out
+
+
+def range_check(saved, d, feats):
+    """Features whose median over the plots of this flight lies outside the model's training 5-95 % range
+    ("feature_ranges"): list of (feature, flight_median, lo, hi), largest relative excursion first. Empty when the
+    model stores no ranges."""
+    import pandas as pd
+    rng = saved.get("feature_ranges", {}) if isinstance(saved, dict) else {}
+    out = []
+    for f in dict.fromkeys(feats):
+        if f in rng and f in d.columns and pd.api.types.is_numeric_dtype(d[f]):
+            m = float(d[f].astype(float).median()); lo, hi = rng[f]
+            if m == m and (m < lo or m > hi):
+                w = max(hi - lo, 1e-12); out.append((f, m, lo, hi, (lo - m) / w if m < lo else (m - hi) / w))
+    out.sort(key=lambda r: -r[4])
+    return [r[:4] for r in out]
+
+
 def predict_saved(saved, d, folds="all"):
     """d: DataFrame with the input columns. Returns (pred with NaN where inputs are missing, ok bool array).
     Ensembles: mean of the members; fold ensembles: mean over the selected folds of each fold's member mean."""

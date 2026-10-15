@@ -1,3 +1,34 @@
+# PhenoFuse 4.0.2 (2026-10-16) - pretrained models on a new flight
+
+- **LightGBM bundled.** The Muresk maturity biomass ensembles (fused and LiDAR) contain a LightGBM member; 4.0.1 shipped
+  without the `lightgbm` module, so loading them failed with `No module named 'lightgbm'`. The build environment now has
+  lightgbm 4.6.0 (the version the research models were trained with) and the executable bundles it.
+- **Band models on a flight whose usable bands differ from training.** A pretrained model that uses reflectance bands
+  (`sb_<nm>` features) is now given exactly the bands it was trained on, in the same per-plot SNV normalisation, instead of
+  the flight's own usable-band set. A band that is unusable on every plot of the flight (the GRYFN cube clips the blue
+  bands 417-466 nm to zero on some flights) is set to the SNV mean and the Biomass / Height Models tab prints a warning
+  listing the range. Before, such a flight failed with `input table lacks sb_416.7, ...`.
+- **Index features that are NaN on every plot.** Some indices need a clipped band (mND705 uses 445 nm) and the VNIR tab
+  writes NaN for them; a pretrained model that needs such a feature predicted no plot at all. Every model now stores the
+  medians of its training table (`feature_medians`): a feature NaN on the whole flight is filled with the training median
+  and the tab says which ones were filled (and names the features it could not fill, instead of silently predicting
+  nothing). Models trained from scratch in the app store their medians from now on; the bundled research models were
+  stamped with the medians of their research training tables (`features_<dataset>.csv`) and given a `meta` block
+  (target, modalities, dataset, flight), so the tab's model description no longer shows `?`.
+- **Per-flight spectral PCA scores are no longer model inputs.** `spec_pc1..5` from the VNIR tab are PCA scores of that
+  flight's spectra: their sign and scale differ between extraction runs (the same flight re-extracted gave r = -0.99),
+  which made the research VNIR biomass ensemble predict ~22 t/ha on a 9.5 t/ha flight. They stay in the tables for
+  within-flight analysis, the training families skip them, and a pretrained model that has them gets its training median
+  with a note in the output.
+- **Training-range check.** Every model also stores the 5-95 % range of each training feature (`feature_ranges`). When
+  the flight's median of an input feature falls outside it, the tab says so with examples (e.g. the maturity VNIR
+  biomass ensemble applied to the 30 Sep anthesis flight: CIRE_veg 2.87 vs training 0.33-0.61) and labels the
+  predictions as extrapolations. That model predicts ~20 t/ha on any anthesis table, including the research team's
+  own, because the canopy is green at anthesis; it is a growth-stage mismatch, not an extraction difference (218 of
+  265 shared features are identical between the app's tables and the research tables of the same flight).
+- The false "input feature(s) missing" warning for band features is gone (the bands come from `vnir_spectra.csv`,
+  not from the feature table).
+
 # PhenoFuse 4.0 (2026-10-14)
 
 PhenoFuse is the new name of PhenoApp ("Plant Phenotyping from Point Clouds"): the tool now handles three modalities

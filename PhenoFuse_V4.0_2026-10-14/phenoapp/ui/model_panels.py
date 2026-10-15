@@ -71,12 +71,13 @@ class _TrainWorker(QThread):
                                                          vnir_cols=t["vnir_cols"], spectra=t["spectra"], plot_ids=plot_ids, groups=t["groups"], rgb_cols=t["rgb_cols"],
                                                          vnir_mode=o["vnir_mode"], modalities=o["modalities"], excluded=t.get("excluded"))
                 pred.to_csv(os.path.join(run_dir, "predictions.csv"), index=False)
-                saved = {}
+                saved = {}; train_tab = add_weighted(df)
                 for (fam, ln), (model, feats) in fitted.items():
                     fn = f"{fam}_{ln}".replace("[", "_").replace("]", "").replace("/", "_") + ".joblib"
-                    save_model(os.path.join(run_dir, fn), model, feats, meta={"target": tcol, "family": fam, "learner": ln, "cv": o["cv"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"]})
+                    save_model(os.path.join(run_dir, fn), model, feats, meta={"target": tcol, "family": fam, "learner": ln, "cv": o["cv"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"]},
+                               table=train_tab)
                     saved[f"{fam}/{ln}"] = fn
-                ens = top3_ensemble(results, fitted, key_fn=lambda r: (r["family"], r["learner"]), rmse_key="RMSE")
+                ens = top3_ensemble(results, fitted, key_fn=lambda r: (r["family"], r["learner"]), rmse_key="RMSE", table=train_tab)
                 if ens:
                     import joblib
                     ens["meta"] = {"target": tcol, "kind": "biomass", "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "cv": o["cv"]}
@@ -116,12 +117,14 @@ class _TrainWorker(QThread):
                                                           vnir_cols=t["vnir_cols"], rgb_cols=t["rgb_cols"], vnir_mode=o["vnir_mode"], excluded=t.get("excluded"))
                 pred.to_csv(os.path.join(run_dir, "predictions.csv"), index=False)
                 saved = {}
+                from phenoapp.core.height_models import prepare_features
+                train_tab = prepare_features(df, None, None)
                 for k, (model, feats) in fitted.items():
                     fn = f"height_model_{k}.joblib"
                     save_height_model(os.path.join(run_dir, fn), model, feats, meta={"cv": o["cv"], "modalities": o["modalities"], "vnir_mode": o["vnir_mode"],
-                                                                                     "results": [r for r in results if r.get("key") == k]})
+                                                                                     "results": [r for r in results if r.get("key") == k]}, table=train_tab)
                     saved[k] = fn
-                ens = top3_ensemble(results, fitted, key_fn=lambda r: r["key"], rmse_key="rmse")
+                ens = top3_ensemble(results, fitted, key_fn=lambda r: r["key"], rmse_key="rmse", table=train_tab)
                 if ens:
                     import joblib
                     ens["meta"] = {"kind": "height", "units": "cm", "modalities": o["modalities"], "vnir_mode": o["vnir_mode"], "cv": o["cv"]}
@@ -380,9 +383,38 @@ class PretrainedPanel(QWidget):
             outp = os.path.join(out_dir, f"{flight}_{tgt}_pred_{_basename_key(p)}" + (f"_{folds}" if is_fold_ensembles(saved) else "") + ".csv")
             txt = f"Applied {os.path.basename(p)} ({describe(saved, folds)}) to {flight} with offset {self.sp_off.value():+g}\n"
             v = out[col].dropna(); txt += f"{int(out.model_ok.sum())}/{len(out)} plots predicted; mean {v.mean():.4g}, SD {v.std():.4g}, min {v.min():.4g}, max {v.max():.4g}\n"
-            missing = [f for f in required_features(saved, folds) if f not in df.columns]
+            has_spectra = t.get("spectra") is not None
+            missing = [f for f in required_features(saved, folds) if f not in df.columns and not (f.startswith("sb_") and has_spectra)]
             if missing:
                 txt += f"WARNING: {len(missing)} input feature(s) missing from this flight's tables: {', '.join(missing[:8])}\n"
+            attrs = getattr(out, "attrs", {})
+            filled = list(attrs.get("filled_bands", []))
+            if filled:
+                txt += (f"WARNING: {len(filled)} of the model's reflectance bands are unusable on every plot of this flight "
+                        f"({filled[0][3:]}-{filled[-1][3:]} nm, e.g. clipped by the sensor); they were set to the SNV mean (0), "
+                        f"so predictions lean on the remaining bands.\n")
+            ff = list(attrs.get("filled_features", []))
+            if ff:
+                txt += (f"WARNING: {len(ff)} input feature(s) are NaN on every plot of this flight (an index that needs a clipped band, "
+                        f"e.g. the 445 nm blue band): {', '.join(ff[:8])}; filled with the model's training-set median.\n")
+            rp = list(attrs.get("replaced_features", []))
+            if rp:
+                txt += (f"NOTE: {len(rp)} flight-specific spectral PCA score(s) ({', '.join(rp[:5])}) were replaced by the model's training "
+                        f"median: their sign and scale change between extraction runs, so they cannot be transferred to another flight.\n")
+            oor = list(attrs.get("out_of_range", [])); nchk = int(attrs.get("n_range_checked", 0) or 0)
+            if oor and nchk:
+                meta = saved.get("meta", {}) if isinstance(saved, dict) else {}
+                src = ", ".join(str(meta[k]) for k in ("dataset", "flight") if meta.get(k))
+                ex = "; ".join(f"{f}: flight {m:.3g} vs training {lo:.3g}-{hi:.3g}" for f, m, lo, hi in oor[:4])
+                sev = "WARNING" if len(oor) >= max(3, 0.2 * nchk) else "Note"
+                txt += (f"{sev}: {len(oor)} of {nchk} input features lie outside the model's training range (5-95 %){' - trained on ' + src if src else ''}: "
+                        f"{ex}. The flight is probably at a different growth stage (or sensor setting) than the training flight, so these "
+                        f"predictions are extrapolations; prefer a model trained at the same stage, or train from scratch on this flight.\n")
+            uf = [f for f in attrs.get("unusable_features", []) if f not in ff]
+            if uf:
+                txt += (f"ERROR: {len(uf)} input feature(s) are NaN on every plot of this flight and the model stores no training median "
+                        f"for them, so no plot could be predicted: {', '.join(uf[:8])}. Re-extract the VNIR features with the band policy "
+                        f"used for training, or use a model that does not need them.\n")
             g = self.ed_gt.text().strip()
             if g and os.path.exists(g):
                 from phenoapp.core.dataset import read_csv

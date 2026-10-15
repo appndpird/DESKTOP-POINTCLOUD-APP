@@ -331,9 +331,13 @@ def results_table(results) -> str:
     return "\n".join(lines)
 
 
-def save_height_model(path, model, feats, meta=None):
+def save_height_model(path, model, feats, meta=None, table=None):
+    """table: the prepared training feature table -> its medians are stored so a feature unusable on a new flight can be filled."""
     import joblib
-    joblib.dump({"model": model, "features": feats, "units": "cm", "meta": meta or {}}, path)
+    from .ensembles import feature_medians, feature_ranges
+    joblib.dump({"model": model, "features": feats, "units": "cm", "meta": meta or {},
+                 "feature_medians": feature_medians(table, feats) if table is not None else {},
+                 "feature_ranges": feature_ranges(table, feats) if table is not None else {}}, path)
     return path
 
 
@@ -347,16 +351,22 @@ def apply_height_model(df, saved, offset_cm: float = 0.0, vnir_df=None, spectra=
     offset_cm is added to the prediction (per-flight correction from reference targets or a few measured plots).
     vnir_df / rgb_df / spectra: the flight's VNIR features, RGB features and spectra table, needed by models that use them."""
     import pandas as pd
-    from .ensembles import predict_saved, required_features
+    from .ensembles import predict_saved, required_features, fill_missing, range_check
     d = prepare_features(df, vnir_df, rgb_df)
-    need = required_features(saved, folds)
-    if spectra is not None and any(f.startswith("sb_") for f in need):
-        d = d.merge(spectra_matrix(spectra, excluded=excluded), left_on="Plot_ID", right_index=True, how="left")
-    vc = [f for f in need if f in d.columns and not f.startswith("sb_") and _isnum(d[f])]
-    d[vc] = d[vc].fillna(d[vc].median())
+    need = required_features(saved, folds); filled = []
+    sb = [f for f in need if f.startswith("sb_")]
+    if spectra is not None and sb:
+        # exactly the bands the model was trained on (the flight's usable-band set may differ, e.g. clipped blue bands)
+        sm = spectra_matrix(spectra, excluded=excluded, bands=sb); filled = list(sm.attrs.get("filled_bands", []))
+        d = d.merge(sm, left_on="Plot_ID", right_index=True, how="left")
+    d, filled_feats, replaced = fill_missing(saved, d, need)
     pred, ok = predict_saved(saved, d, folds)
     pred = pred + offset_cm
     out = pd.DataFrame({"Plot_ID": d["Plot_ID"], "height_pred_cm": pred, "offset_cm": offset_cm, "model_ok": ok.astype(int)})
     if "cth_p95" in d.columns:
         out.insert(1, "cth_p95_cm", d["cth_p95"].values)
+    out.attrs["filled_bands"] = filled; out.attrs["filled_features"] = filled_feats; out.attrs["replaced_features"] = replaced
+    out.attrs["unusable_features"] = [f for f in need if f in d.columns and not f.startswith("sb_") and d[f].isna().all()]
+    out.attrs["out_of_range"] = range_check(saved, d, [f for f in need if f not in replaced])
+    out.attrs["n_range_checked"] = len([f for f in dict.fromkeys(need) if f in saved.get("feature_ranges", {})]) if isinstance(saved, dict) else 0
     return out

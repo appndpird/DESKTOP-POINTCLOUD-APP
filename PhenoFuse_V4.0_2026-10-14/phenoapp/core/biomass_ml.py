@@ -417,9 +417,13 @@ def results_table(results, unit=""):
     return "\n".join(lines)
 
 
-def save_model(path, model, feats, meta=None):
+def save_model(path, model, feats, meta=None, table=None):
+    """table: the training feature table -> its medians are stored so a feature unusable on a new flight can be filled."""
     import joblib
-    joblib.dump({"model": model, "features": feats, "meta": meta or {}}, path); return path
+    from .ensembles import feature_medians, feature_ranges
+    joblib.dump({"model": model, "features": feats, "meta": meta or {},
+                 "feature_medians": feature_medians(table, feats) if table is not None else {},
+                 "feature_ranges": feature_ranges(table, feats) if table is not None else {}}, path); return path
 
 
 def load_model(path):
@@ -431,19 +435,27 @@ def apply_model(df, saved, offset=0.0, spectra=None, folds="all", excluded=None)
     """spectra: mean vegetation spectra table of the flight, needed by the band models (columns sb_<nm>).
     folds: for fold-ensemble files, "all" | "best3" | list of fold numbers (see core.ensembles)."""
     import pandas as pd
-    from .ensembles import is_ensemble, is_fold_ensembles, predict_saved, required_features
-    d = add_weighted(df); feats = required_features(saved, folds)
-    if spectra is not None and any(f.startswith("sb_") for f in feats):
-        d = d.merge(spectra_matrix(spectra, excluded=excluded), left_on="Plot_ID", right_index=True, how="left")
+    from .ensembles import is_ensemble, is_fold_ensembles, predict_saved, required_features, fill_missing, range_check
+    d = add_weighted(df); feats = required_features(saved, folds); filled = []
+    sb = [f for f in feats if f.startswith("sb_")]
+    if spectra is not None and sb:
+        # exactly the bands the model was trained on (the flight's usable-band set may differ, e.g. clipped blue bands)
+        sm = spectra_matrix(spectra, excluded=excluded, bands=sb); filled = list(sm.attrs.get("filled_bands", []))
+        d = d.merge(sm, left_on="Plot_ID", right_index=True, how="left")
+    d, filled_feats, replaced = fill_missing(saved, d, feats)
     if is_ensemble(saved) or is_fold_ensembles(saved):
-        have = [f for f in feats if f in d.columns]
-        d[have] = d[have].fillna(d[have].median())
         p, ok = predict_saved(saved, d, folds)
-        return pd.DataFrame({"Plot_ID": d.Plot_ID, "predicted": p + offset, "model_ok": ok.astype(int)})
-    missing = [f for f in feats if f not in d.columns]
-    if missing:
-        raise ValueError("feature table lacks " + ", ".join(missing))
-    X = d[feats].astype(float).to_numpy(); ok = np.isfinite(X).all(1); p = np.full(len(d), np.nan)
-    if ok.any():
-        p[ok] = saved["model"].predict(X[ok]).ravel() + offset
-    return pd.DataFrame({"Plot_ID": d.Plot_ID, "predicted": p, "model_ok": ok.astype(int)})
+        out = pd.DataFrame({"Plot_ID": d.Plot_ID, "predicted": p + offset, "model_ok": ok.astype(int)})
+    else:
+        missing = [f for f in feats if f not in d.columns]
+        if missing:
+            raise ValueError("feature table lacks " + ", ".join(missing))
+        X = d[feats].astype(float).to_numpy(); ok = np.isfinite(X).all(1); p = np.full(len(d), np.nan)
+        if ok.any():
+            p[ok] = saved["model"].predict(X[ok]).ravel() + offset
+        out = pd.DataFrame({"Plot_ID": d.Plot_ID, "predicted": p, "model_ok": ok.astype(int)})
+    out.attrs["filled_bands"] = filled; out.attrs["filled_features"] = filled_feats; out.attrs["replaced_features"] = replaced
+    out.attrs["unusable_features"] = [f for f in feats if f in d.columns and not f.startswith("sb_") and d[f].isna().all()]
+    out.attrs["out_of_range"] = range_check(saved, d, [f for f in feats if f not in replaced])
+    out.attrs["n_range_checked"] = len([f for f in dict.fromkeys(feats) if f in saved.get("feature_ranges", {})]) if isinstance(saved, dict) else 0
+    return out
