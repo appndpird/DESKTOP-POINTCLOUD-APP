@@ -333,10 +333,19 @@ def lidar_features_all(x, y, z, intensity, return_number, number_of_returns, plo
     if "_row_profile" in df.columns:
         try:
             from .grid_rows import rows_from_profile
-            pitch = ROW_PITCH_M
+            pitch = ROW_PITCH_M; src = "set_row_pitch"
+            if pitch is None and "row_pitch" in getattr(plots, "columns", []):
+                # a grid corrected by grid_rows carries the seeder pitch measured on the reference flight (open canopy): use it
+                try:
+                    gp = float(np.nanmedian(np.asarray(plots["row_pitch"], float)))
+                    if np.isfinite(gp) and 0.1 < gp < 0.6: pitch = gp; src = "grid row_pitch"
+                except Exception:
+                    pass
             if pitch is None:
                 ok = df.row_pitch_m.notna() & (df.row_pitch_share >= df.row_pitch_share.median())
                 pitch = float(df.loc[ok, "row_pitch_m"].median()) if ok.any() else (float(df.row_pitch_m.median()) if df.row_pitch_m.notna().any() else None)
+                src = "flight periodogram (unreliable on a closed canopy - prefer a grid corrected from rows or set_row_pitch)"
+            df.attrs["row_pitch_source"] = src
             if pitch:
                 for k in df.index:
                     prof = df.at[k, "_row_profile"]; hw_ = df.at[k, "_row_hw"]
