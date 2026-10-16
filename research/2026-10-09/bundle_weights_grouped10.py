@@ -4,7 +4,7 @@ Deep Models tab can use all folds or the best three."""
 import os, glob, shutil, torch, numpy as np, pandas as pd
 from sklearn.model_selection import StratifiedGroupKFold
 R = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment\Biomass_Height_2026-10-09"; SRC = os.path.join(R, "two_stream", "models")
-TOOL = r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06"; DST = os.path.join(TOOL, "phenoapp", "assets", "dl_models")
+TOOL = r"C:\Users\appn\Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06"; DST = os.path.join(TOOL, "phenoapp", "assets", "dl_models")
 idx_all = pd.read_csv(os.path.join(R, "two_stream", "dl_data", "index.csv")); rows = []; n = 0
 for f in glob.glob(os.path.join(DST, "*.pt")): os.unlink(f)
 for target, tag, dsets in (("biomass", "commonbands_grouped", None), ("height", "commonbands_grouped_maturity", ["muresk_maturity"])):

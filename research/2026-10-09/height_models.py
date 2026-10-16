@@ -23,7 +23,7 @@ try: import xgboost as xgb
 except Exception: xgb = None
 try: import lightgbm as lgb
 except Exception: lgb = None
-TOOL = r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06"; sys.path.insert(0, TOOL)
+TOOL = r"C:\Users\appn\Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06"; sys.path.insert(0, TOOL)
 from phenoapp.core.lidar_features import LIDAR_V3_CORE
 from phenoapp.core.vnir_features import VNIR_V3_CORE
 B = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment"; ROOT = os.path.join(B, "Biomass_Height_2026-10-09"); DS = os.path.join(ROOT, "dataset")

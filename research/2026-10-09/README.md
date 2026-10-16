@@ -2,7 +2,7 @@
 
 Rebuilt from scratch on the combined dataset `Biomass Experiment\Dataset_2026-10-09` with PhenoApp v3.3
 (= v3.2 LiDAR pipeline from the point-cloud session + v3.0.1 VNIR QC from the VNIR session), tool source in
-`DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06`.
+`PhenoFuse-main\phenoapp_v3_2026-10-06`.
 
 ## Folders
 - `scripts\`      the exact scripts that produced everything here, in run order:
@@ -169,5 +169,5 @@ the common run 18:00 to about 14:30 the next day. The first fold of a run includ
   afterwards to fill section 5 of the report.
 - QC scripts of the 8 October VNIR audit (ENVI/IDL) and the workbook build are in `scripts\vnir_qc_idl\` and
   `scripts\workbooks\`; the dataset itself is described in `dataset\README.md`.
-- Tool executable of v3.3: `Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06\dist_v3.3_2026-10-09\PhenoApp_v3\PhenoApp_v3.exe`
-  (PyInstaller, built 9 Oct 2026 16:23 from the v3.3 source; GitHub: appndpird/DESKTOP-POINTCLOUD-APP, `phenoapp_v3.3_2026-10-09/`).
+- Tool executable of v3.3: `Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06\dist_v3.3_2026-10-09\PhenoApp_v3\PhenoApp_v3.exe`
+  (PyInstaller, built 9 Oct 2026 16:23 from the v3.3 source; GitHub: appndpird/PhenoFuse, `phenoapp_v3.3_2026-10-09/`).

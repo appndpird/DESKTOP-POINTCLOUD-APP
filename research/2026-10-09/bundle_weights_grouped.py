@@ -4,7 +4,7 @@ height  = dl_height_commonbands_grouped_maturity_<variant>_fold0-4 (128 plots, m
 The previously bundled (ungrouped) files are moved to <tool>\\_dl_models_v3.3.2_superseded (outside the bundled assets)."""
 import os, glob, shutil, torch, pandas as pd
 SRC = r"D:\Biomass and Height data for modeling(Ibrahim)\Biomass Experiment\Biomass_Height_2026-10-09\two_stream\models"
-TOOL = r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06"
+TOOL = r"C:\Users\appn\Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06"
 DST = os.path.join(TOOL, "phenoapp", "assets", "dl_models"); OLD = os.path.join(TOOL, "_dl_models_v3.3.2_superseded"); os.makedirs(OLD, exist_ok=True)
 for f in glob.glob(os.path.join(DST, "*.pt")): shutil.move(f, os.path.join(OLD, os.path.basename(f)))
 n = 0

@@ -3,7 +3,7 @@ pixel values are exact copies of the orthomosaic, the plot polygon is carried by
 mask instead of a nodata tag, so zero-valued (clipped) pixels inside the plot are no longer shown
 as holes in QGIS. File names and folders are unchanged. Also rewrites the README lines."""
 import os, sys, re, glob, time
-sys.path.insert(0, r"E:\Software\DESKTOP-POINTCLOUD-APP\phenoapp_v2")
+sys.path.insert(0, r"E:\Software\PhenoFuse\phenoapp_v2")
 from phenoapp.core import load_grid, VNIRCube
 B = r"F:\Ibrahim's Workspace2\Biomass Experiment"; DS = os.path.join(B, "Biomass Dataset"); AGT = os.path.join(B, "2025_NUE_AGT_I_DPIRD")
 JOBS = [

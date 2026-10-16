@@ -26,7 +26,7 @@ try: import lightgbm as lgb
 except Exception: lgb = None
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pca_families import spectra_matrix, pca_preprocessor, pca_learners, pca_blocks, pca_summary, SB_PREFIX
-sys.path.insert(0, r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06")
+sys.path.insert(0, r"C:\Users\appn\Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06")
 from phenoapp.core.biomass_ml import LIDAR_CORE_BIOMASS as LIDAR_CORE, VNIR_CORE_BIOMASS as VNIR_CORE, WEIGHTED, _NON_FEATURES
 
 import argparse

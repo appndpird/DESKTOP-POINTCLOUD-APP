@@ -11,7 +11,7 @@ Output: <Models_2026-10-09>/two_stream/dl_data/<dataset>/plot_<Plot_ID>.npz and 
 """
 import os, sys, re, json, glob, time, numpy as np, pandas as pd, laspy
 from shapely import contains_xy
-TOOL = r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06"; sys.path.insert(0, TOOL)
+TOOL = r"C:\Users\appn\Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06"; sys.path.insert(0, TOOL)
 from phenoapp.core import plot_region
 from grid_pyshp import load_grid                       # fiona / pyogrio are blocked on this machine: pyshp-based grid reader
 from vnir_envi import read_plot_tif, _parse_hdr, _hdr  # rasterio is blocked too: tifffile reader for the per-plot cubes

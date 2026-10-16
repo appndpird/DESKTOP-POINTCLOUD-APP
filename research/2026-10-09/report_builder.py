@@ -204,7 +204,7 @@ if os.path.exists(rsp):
                 if t == "height" and "muresk_maturity" not in f: continue
                 q = pd.read_csv(os.path.join(M, t, "results", f))
                 fm.append(q.assign(approach="features (fold ensemble: top three chosen on the fold's training plots)", fold=q.outer_fold)[["target", "dataset", "category", "approach", "fold", "n_test", "R2", "RMSE"]])
-    fsp = r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06\phenoapp\assets\dl_models\fold_scores.csv"
+    fsp = r"C:\Users\appn\Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06\phenoapp\assets\dl_models\fold_scores.csv"
     if os.path.exists(fsp):
         q = pd.read_csv(fsp); q["dataset"] = np.where(q.target == "height", "muresk_maturity", "all four datasets pooled")
         fm.append(q.assign(category=q.variant.map({"lidar_only": "lidar", "vnir_only": "vnir", "two_stream": "fused"}), approach="deep learning (fold model)")[["target", "dataset", "category", "approach", "fold", "n_test", "R2", "RMSE"]])

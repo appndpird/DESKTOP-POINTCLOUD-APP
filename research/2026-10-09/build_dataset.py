@@ -18,7 +18,7 @@ Build the clean, combined per-plot dataset for both modalities (Dataset_2026-10-
 Run in the phenoapp venv:  python build_dataset.py [flight_key ...]
 """
 import os, sys, json, time, gc, traceback, shutil, numpy as np, pandas as pd, laspy
-TOOL = r"C:\Users\appn\Downloads\DESKTOP-POINTCLOUD-APP-main\phenoapp_v3_2026-10-06"
+TOOL = r"C:\Users\appn\Downloads\PhenoFuse-main\phenoapp_v3_2026-10-06"
 sys.path.insert(0, TOOL)
 from phenoapp.core import plot_region
 from grid_pyshp import load_grid                       # fiona / pyogrio are blocked on this machine: pyshp-based grid reader

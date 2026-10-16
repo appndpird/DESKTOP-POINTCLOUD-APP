@@ -16,7 +16,7 @@ Usage  : python build_plot_traits_indices.py [muresk] [agt]
 """
 import os, sys, time, json, traceback, numpy as np, pandas as pd
 # 2026-10-09: needs PhenoApp v3.0.1 or later (NaN rule for unusable bands, band_usable, reflectance check)
-sys.path.insert(0, r"E:\Software\DESKTOP-POINTCLOUD-APP\phenoapp_v3_2026-10-06")
+sys.path.insert(0, r"E:\Software\PhenoFuse\phenoapp_v3_2026-10-06")
 from phenoapp.core import LASManager, load_grid, extract_all_plots, TRAIT_KEYS, plot_region, VNIRCube
 from phenoapp.core.spectral_indices import IndexCatalogue, compute_plot_indices, DEFAULT_EXCLUDED_NM, RECOMMENDED_BIOMASS, band_usable, MIN_VALID_FRAC
 
