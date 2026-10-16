@@ -126,6 +126,22 @@ class _IndexWorker(QThread):
             self.error.emit(f"{e}\n\n{traceback.format_exc()}")
 
 
+class _CalibWorker(QThread):
+    progress = pyqtSignal(int, str); done_ok = pyqtSignal(dict); error = pyqtSignal(str)
+    def __init__(self, kw): super().__init__(); self._kw = kw
+    def run(self):
+        try:
+            from phenoapp.core.vnir_calibration import calibrate_cube
+            kw = self._kw; grid = None
+            if kw.get("grid_path") and os.path.exists(kw["grid_path"]):
+                grid = load_grid(kw["grid_path"], target_crs=kw.get("work_crs"))
+            res = calibrate_cube(kw["cube"], kw["mode"], reference=kw.get("reference"), grid=grid, targets=kw.get("targets"), spectra_csv=kw.get("spectra_csv"),
+                                 soil_ndvi_max=kw.get("soil_ndvi_max", 0.2), progress_cb=lambda p, m: self.progress.emit(int(p), m))
+            self.done_ok.emit(res)
+        except Exception as e:
+            import traceback; self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+
 class _V3Worker(QThread):
     progress = pyqtSignal(int, str)
     done_ok = pyqtSignal(str)
@@ -231,6 +247,36 @@ class IndicesPanel(QWidget):
         f.addRow("", self.cb_rasters)
         v.addWidget(top)
 
+        # ---- reflectance check / empirical calibration (4.0.4) ----
+        cal = QGroupBox("Reflectance check and empirical calibration (for a cube delivered as radiance)"); fc = QFormLayout(cal)
+        rowc = QHBoxLayout(); self.btn_check = QPushButton("Check cube"); self.btn_check.clicked.connect(self._check_cube); self.lbl_check = QLabel("not checked")
+        self.lbl_check.setWordWrap(True); rowc.addWidget(self.btn_check); rowc.addWidget(self.lbl_check, stretch=1); fc.addRow("Calibration:", rowc)
+        self.btn_check.setToolTip("Samples three windows of the cube and looks at the median spectrum: a reflectance cube has no atmospheric absorption lines, "
+                                  "a radiance cube still shows the oxygen-A dip at 760 nm and the water-vapour dip at 940 nm, and NIR about equal to red.")
+        self.cb_cal_mode = QComboBox()
+        self.cb_cal_mode.addItems(["Reference targets in this flight (panels / tarps with known reflectance) - best",
+                                   "Calibrated cube of the same trial (another flight of the day, or another date) - bare soil as invariant target"])
+        self.cb_cal_mode.setCurrentIndex(1); self.cb_cal_mode.currentIndexChanged.connect(self._cal_mode); fc.addRow("Reference:", self.cb_cal_mode)
+        self.ed_cal_ref = QLineEdit(); bref = QPushButton("Browse..."); bref.clicked.connect(lambda: self._pick_into(self.ed_cal_ref, "Calibrated reference cube (.bin)", "ENVI cubes (*.bin *.img *.dat);;All files (*)"))
+        r1 = QHBoxLayout(); r1.addWidget(self.ed_cal_ref); r1.addWidget(bref); fc.addRow("Reference cube:", r1)
+        self.ed_cal_targets = QLineEdit(); btg = QPushButton("Browse..."); btg.clicked.connect(lambda: self._pick_into(self.ed_cal_targets, "Reference target polygons", "Vector (*.shp *.gpkg *.geojson);;All files (*)"))
+        r2 = QHBoxLayout(); r2.addWidget(self.ed_cal_targets); r2.addWidget(btg); fc.addRow("Target polygons:", r2)
+        self.ed_cal_spectra = QLineEdit(); bsp = QPushButton("Browse..."); bsp.clicked.connect(lambda: self._pick_into(self.ed_cal_spectra, "Target reflectance spectra CSV", "CSV (*.csv);;All files (*)"))
+        r3 = QHBoxLayout(); r3.addWidget(self.ed_cal_spectra); r3.addWidget(bsp); fc.addRow("Target spectra CSV:", r3)
+        self.ed_cal_targets.setToolTip("Polygons of the reference panels / tarps in THIS flight. Either a column 'refl' with the constant reflectance (0-1) of each polygon, "
+                                       "or a column 'name' matching a column of the spectra CSV (wavelength_nm + one reflectance column per target).")
+        self.dsb_soil_ndvi = QDoubleSpinBox(); self.dsb_soil_ndvi.setRange(0.05, 0.5); self.dsb_soil_ndvi.setSingleStep(0.05); self.dsb_soil_ndvi.setValue(0.20)
+        self.dsb_soil_ndvi.setToolTip("Bare soil = positions where the REFERENCE cube's NDVI is below this value (tracks, alleys). The gain is the median reference reflectance "
+                                      "over these positions divided by the median value of this cube at the same positions, band by band.")
+        fc.addRow("Soil NDVI below:", self.dsb_soil_ndvi)
+        self.btn_cal = QPushButton("Calibrate -> write <cube>_reflectance_empirical.bin and use it"); self.btn_cal.clicked.connect(self._calibrate)
+        self.btn_cal.setToolTip("R = gain x value (+ offset with two or more targets), per band. Writes the calibrated ENVI cube (uint16 x 10000, same grid) next to the "
+                                "original with a gain table, a README with the recipe and caveats, and a before / after figure; the cube field then points to it.\n"
+                                "Across DATES the bare-soil reference assumes the soil did not change: ratio indices stay reliable, absolute reflectance is uncertain by ~10-20 %. "
+                                "A panel in the same flight, or a calibrated flight of the same day, avoids that.")
+        fc.addRow("", self.btn_cal)
+        v.addWidget(cal); self._cal_mode()
+
         # ---- catalogue tree ----
         mid = QGroupBox("Indices (tick to compute; hover for formula and reference)")
         mv = QVBoxLayout(mid)
@@ -301,7 +347,71 @@ class IndicesPanel(QWidget):
                                            "ENVI cubes (*.bin *.img *.dat);;All files (*)")
         if p:
             self.ed_vnir.setText(p); state().vnir_path = p
-            self.refresh_catalogue()
+            self.refresh_catalogue(); self._check_cube(quiet=True)
+
+    # ---- reflectance check / empirical calibration (4.0.4) ----
+    def _pick_into(self, edit, title, filt):
+        p, _ = QFileDialog.getOpenFileName(self, title, "", filt)
+        if p: edit.setText(p)
+
+    def _cal_mode(self):
+        targets = self.cb_cal_mode.currentIndex() == 0
+        for w in (self.ed_cal_targets, self.ed_cal_spectra): w.setEnabled(targets)
+        for w in (self.ed_cal_ref, self.dsb_soil_ndvi): w.setEnabled(not targets)
+
+    def _check_cube(self, quiet=False):
+        cube = self.ed_vnir.text().strip() or state().vnir_path
+        if not cube or not os.path.exists(cube):
+            if not quiet: QMessageBox.warning(self, "No cube", "Pick a VNIR cube first.")
+            return
+        try:
+            from phenoapp.core.vnir_calibration import calibration_check
+            c = calibration_check(cube)
+        except Exception as e:
+            self.lbl_check.setText(f"check failed: {e}"); return
+        txt = (f"looks like {c['looks_like'].upper()}  ({c['dtype']}, scale factor {c['scale_factor'] or 'none'}; O2-A 760 nm dip {c['o2a_ratio']:.2f}, "
+               f"water-vapour 940 nm dip {c['h2o_ratio']:.2f}, NIR/red {c['nir_red']:.2f}, NDVI median {c['ndvi_p50']:.2f})")
+        if c["reasons"]: txt += " - " + "; ".join(c["reasons"])
+        self.lbl_check.setText(txt)
+        self.lbl_check.setStyleSheet("color: #b00000; font-weight: bold" if c["looks_like"] == "radiance" else ("color: #a06000" if c["looks_like"] == "doubtful" else "color: #006000"))
+        if not quiet and c["looks_like"] != "reflectance":
+            QMessageBox.warning(self, "Cube calibration", txt + "\n\nEvery vegetation index on this cube would be meaningless. Reprocess it to reflectance, or use the empirical "
+                                "calibration below (a reference panel in this flight, or a calibrated cube of the same trial).")
+
+    def _calibrate(self):
+        s = state(); cube = self.ed_vnir.text().strip() or s.vnir_path
+        if not cube or not os.path.exists(cube):
+            QMessageBox.warning(self, "No cube", "Pick the VNIR cube to calibrate first."); return
+        mode = "targets" if self.cb_cal_mode.currentIndex() == 0 else "cube"
+        kw = dict(cube=cube, mode=mode, soil_ndvi_max=self.dsb_soil_ndvi.value(), work_crs=s.work_crs,
+                  grid_path=(s.saved_grid if (s.saved_grid and os.path.exists(s.saved_grid)) else s.grid_path))
+        if mode == "cube":
+            ref = self.ed_cal_ref.text().strip()
+            if not ref or not os.path.exists(ref): QMessageBox.warning(self, "No reference cube", "Pick the calibrated reference cube of the same trial."); return
+            if os.path.abspath(ref) == os.path.abspath(cube): QMessageBox.warning(self, "Reference", "The reference must be a different, calibrated cube."); return
+            kw["reference"] = ref
+        else:
+            tg = self.ed_cal_targets.text().strip()
+            if not tg or not os.path.exists(tg): QMessageBox.warning(self, "No targets", "Pick the polygons of the reference targets in this flight."); return
+            kw["targets"] = tg; kw["spectra_csv"] = self.ed_cal_spectra.text().strip() or None
+        self.btn_cal.setEnabled(False); self.progress.setValue(0); self.out.setPlainText("Empirical calibration running...")
+        self._wc = _CalibWorker(kw)
+        self._wc.progress.connect(lambda p, m: (self.progress.setValue(p), self.progress.setFormat(f"{p}% - {m}")))
+        self._wc.done_ok.connect(self._on_calibrated)
+        self._wc.error.connect(lambda e: (self.btn_cal.setEnabled(True), self._on_err(e)))
+        self._wc.start()
+
+    def _on_calibrated(self, res):
+        self.btn_cal.setEnabled(True); r = res["result"]; b = res["check_before"]; a = res["check_after"]
+        self.ed_vnir.setText(res["out_cube"]); state().vnir_path = res["out_cube"]; self.refresh_catalogue(); self._check_cube(quiet=True)
+        msg = (f"Calibrated cube -> {res['out_cube']}\nMethod: {r['method']}\nReference: {r['reference']}\n"
+               f"Samples: {r['n_positions']} positions, {r['n_soil']} bare-soil; gain repeatability between two halves {r['repeatability_pct']:.2f} %\n"
+               f"Before: {b['looks_like']} (O2-A {b['o2a_ratio']:.2f}, H2O {b['h2o_ratio']:.2f}, NIR/red {b['nir_red']:.2f}, NDVI {b['ndvi_p50']:.2f})\n"
+               f"After : {a['looks_like']} (O2-A {a['o2a_ratio']:.2f}, H2O {a['h2o_ratio']:.2f}, NIR/red {a['nir_red']:.2f}, NDVI {a['ndvi_p50']:.2f})\n"
+               f"Gain table, README (recipe + caveats) and QA figure next to the cube: {res['qa_png']}\n\n"
+               "The cube field now points to the calibrated cube: run the VNIR features on it. Ratio indices are reliable; treat absolute reflectance from a cross-date "
+               "soil reference as approximate (~10-20 %). A reprocessing to reflectance by the sensor software supersedes this file.")
+        self.out.setPlainText(msg); QMessageBox.information(self, "Empirical calibration done", msg)
 
     def _policy_changed(self, *_):
         std = [((0.0, 415.0), self.cb_ex_edge), ((755.0, 770.0), self.cb_ex_o2a), ((928.0, 962.0), self.cb_ex_wv)]

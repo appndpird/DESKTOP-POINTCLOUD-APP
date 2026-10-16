@@ -104,6 +104,31 @@ tall stubble, lower them for short crops at early stages, and keep them identica
 Every tab sits in a scroll area, so the window can be dragged from any edge down to 480 x 360 pixels; it opens at 90 % of
 the screen at most.
 
+### Reflectance check and empirical calibration (4.0.4)
+
+A VNIR orthomosaic can arrive as at-sensor radiance instead of reflectance (float values, no reflectance scale factor in
+the header). The tell-tale is the spectral shape: sunlight's absorption lines are still in every spectrum (the oxygen-A dip
+at 760 nm, the water-vapour dip at 940 nm) and NIR is about equal to red, so NDVI is 0 everywhere. **Check cube** on the
+VNIR Spectral Features tab reports this and the tab warns when such a cube is picked. The fix of choice is to reprocess
+the flight to reflectance. When that is not possible, **Calibrate** applies an empirical line band by band,
+R = gain x value (+ offset), with the gain measured on a known surface:
+
+- *Reference targets in this flight*: polygons of panels or tarps with a known reflectance spectrum (CSV with
+  `wavelength_nm` and one column per target) or a constant reflectance (`refl` column). Same date and illumination, the
+  proper method; two or more targets of different brightness also fit an offset.
+- *Calibrated cube of the same trial*: the bare soil of the trial (reference NDVI below the limit, i.e. wheel tracks and
+  alleys) is the pseudo-invariant target; the gain is the median reference reflectance over those positions divided by the
+  median value of this cube at the same positions. Across flights of the same day this is nearly exact. Across dates it
+  assumes the soil's reflectance did not change: moisture, roughness and residue change it, mostly as a wavelength-flat
+  factor, so ratio indices (NDVI, red-edge, CIRE) stay reliable while absolute reflectance is uncertain by roughly
+  10-20 %. The gain is reported with its repeatability between two halves of the soil samples, and the QA figure shows
+  the before / after spectra and, for the cube reference, the crop pixels of the reference against the same pixels after
+  calibration.
+
+The output `<cube>_reflectance_empirical.bin` is an ENVI cube on the same grid (uint16 x 10000, wavelengths in the header),
+with `_gain.csv`, `_README.txt` (recipe and caveats) and `_qa.png` next to it; the per-plot features then run on it as on
+any reflectance cube.
+
 ### Correct the grid from the crop rows (4.0.3)
 
 A grid drawn from the trial design or aligned on a coarse canopy raster is typically 10-30 cm off the seeded rows, and

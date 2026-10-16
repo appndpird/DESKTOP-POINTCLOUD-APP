@@ -1,6 +1,6 @@
 # PhenoFuse - multi-sensor plot phenotyping (formerly PhenoApp, Plant Phenotyping from Point Clouds)
 
-**Current version: PhenoFuse 4.0.3 (2026-10-16)** - folder `PhenoFuse_V4.0.2_2026-10-16/` (README, `RELEASE_NOTES_v4.0.md`,
+**Current version: PhenoFuse 4.0.4 (2026-10-17)** - folder `PhenoFuse_V4.0.2_2026-10-16/` (README, `RELEASE_NOTES_v4.0.md`,
 `USER_GUIDE.md`, `Models/` with the latest height and biomass models). PhenoFuse is PhenoApp renamed: three modalities per plot
 (LiDAR, VNIR hyperspectral, RGB orthomosaic), one feature table per modality per flight (`plots_lidar/lidar_features.csv`,
 `plots_vnir/vnir_features.csv`, `plots_rgb/rgb_features.csv`), a Dataset tab that pools several flights, and every modelling

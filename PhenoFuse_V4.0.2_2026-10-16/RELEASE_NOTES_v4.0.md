@@ -1,3 +1,17 @@
+# PhenoFuse 4.0.4 (2026-10-17) - reflectance check and empirical calibration of a VNIR cube
+
+- **Check cube** (VNIR Spectral Features tab): tells whether a cube is reflectance or at-sensor radiance from its median
+  spectrum (oxygen-A dip at 760 nm, water-vapour dip at 940 nm, NIR/red, NDVI). A radiance cube is flagged when it is picked.
+- **Empirical calibration**: R = gain x value (+ offset) per band, from either reference targets in the same flight
+  (panels / tarps with a known reflectance spectrum or a constant reflectance; two or more targets also give an offset)
+  or a calibrated cube of the same trial, using the bare soil (reference NDVI below 0.20, wheel tracks and alleys) as a
+  pseudo-invariant target. Writes `<cube>_reflectance_empirical.bin/.hdr` (uint16 x 10000, same grid), a gain table, a
+  README with recipe and caveats, and a before / after QA figure; the tab then uses the calibrated cube. Reported with the
+  gain repeatability between two halves of the samples. Across dates the soil reference assumes unchanged soil: ratio
+  indices stay reliable, absolute reflectance is uncertain by ~10-20 %; a same-day reference avoids that.
+  (Found on the AGT 2025-11-13 flights, delivered as radiance; calibrated against 2025-09-22 the maturity crop matched the
+  Muresk maturity canopy band for band.)
+
 # PhenoFuse 4.0.3 (2026-10-16) - grid corrected from the crop rows, row detection, RGB deep stream
 
 - **Correct grid from rows (Edit tab, new toolbar action).** The plot polygons are re-fitted to the crop as the point cloud

@@ -1,4 +1,4 @@
-# PhenoFuse 4.0.3 (2026-10-16) - multi-sensor plot phenotyping
+# PhenoFuse 4.0.4 (2026-10-17) - multi-sensor plot phenotyping
 
 **PhenoFuse** (formerly PhenoApp, "Plant Phenotyping from Point Clouds") extracts per-plot features from three UAV
 modalities - **LiDAR** point clouds, **VNIR** hyperspectral cubes and **RGB** orthomosaics - over one plot grid, and fits
