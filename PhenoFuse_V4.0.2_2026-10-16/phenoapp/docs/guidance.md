@@ -167,6 +167,38 @@ The output `<cube>_reflectance_empirical.bin` is an ENVI cube on the same grid (
 with `_gain.csv`, `_README.txt` (recipe and caveats) and `_qa.png` next to it; the per-plot features then run on it as on
 any reflectance cube.
 
+**Preparing the reference targets (files for the "targets" option).** The reflectance spectrum comes from the target itself,
+not from the flight:
+
+1. *Calibration certificate*: commercial panels and tarps (Labsphere Spectralon, Group 8 Technology tarps, the panels supplied
+   with Headwall / GRYFN kits, MosaicMill targets) ship with a table of reflectance against wavelength, usually every 1-10 nm
+   from 350 to 2500 nm. That table is the CSV. GRYFN's own reflectance workflow uses such a panel, so its spectrum should exist
+   with whoever runs the GRYFN Processing Tool - ask for the file.
+2. *Field spectroradiometer*: measure the tarp with an ASD FieldSpec / Spectral Evolution against a white reference, ideally on
+   the flight day, averaging several spots; export reflectance to CSV. This also captures ageing and dirt, which a certificate
+   does not.
+3. *Nominal value*: for a grey, spectrally flat panel with no spectrum at hand, put one number in the polygon's `refl` column
+   (e.g. 0.50 for a nominal 50 % panel) and leave the CSV field empty; the constant is applied to every band (a few percent
+   error in the blue and NIR).
+
+CSV layout (any wavelength step; the tool interpolates to the cube's bands; reflectance 0-1):
+
+```
+wavelength_nm,panel_50,panel_05
+400,0.492,0.051
+410,0.494,0.051
+...
+1000,0.501,0.053
+```
+
+Polygons in QGIS: Layer > Create Layer > New Shapefile Layer, geometry Polygon, CRS of the cube (EPSG:7850 for DPIRD WA),
+fields `name` (text) and `refl` (decimal). Digitise one polygon per target well inside the panel, away from its edges,
+shadows and glint. Set `name` to the matching CSV column (`panel_50`), or `refl` to the nominal value when there is no
+spectrum. Save, then pick the shapefile under *Target polygons* and the CSV under *Target spectra CSV*. Two targets of
+different brightness (a bright and a dark panel) let the tool fit gain and offset per band, which also removes the
+atmospheric path radiance; one target gives gain only. Fly a tarp on every campaign and keep its certificate with the
+project: the correction is then a two-minute step with no cross-date assumption.
+
 ### Correct the grid from the crop rows (4.0.3)
 
 A grid drawn from the trial design or aligned on a coarse canopy raster is typically 10-30 cm off the seeded rows, and
