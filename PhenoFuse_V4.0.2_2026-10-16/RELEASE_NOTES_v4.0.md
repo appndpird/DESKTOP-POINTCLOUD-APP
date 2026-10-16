@@ -1,3 +1,27 @@
+# PhenoFuse 4.0.3 (2026-10-16) - grid corrected from the crop rows, row detection, RGB deep stream
+
+- **Correct grid from rows (Edit tab, new toolbar action).** The plot polygons are re-fitted to the crop as the point cloud
+  sees it, at 2 cm in every plot's own frame: the wheel tracks between plots are found as a periodic comb per range (one
+  pitch, fitted to the whole range - far more robust than a minimum per plot), every plot is re-centred between its two
+  tracks and on the alleys at its ends (equal end margins), and the crop rows are detected (seeder pitch from the
+  periodogram of all plots, per-plot comb). Evidence is chosen per flight from cover, ground visibility (the plant bases,
+  which do not move when the canopy leans) and canopy top. Two modes: *Fit plots to rows* (once, on the flight with the
+  clearest rows - the trial's reference grid) and *Register grid to this flight* (one rigid shift of the reference grid;
+  flights of the same trial were found 0.1-0.4 m apart in georeferencing). Outputs `<grid>_corrected.shp`, `_rows.shp`
+  (one line per row), `_rows.csv`, `_report.csv`, `_diag.json`, `_qa.png` and a `rows_gallery/` with every plot.
+  On the Muresk NUE trial: self-consistency 0.5 cm across / 0 cm along; 7 rows per plot at 22.6 cm on all 128 plots.
+- **Row features in the LiDAR feature table**: `n_rows` (rows that fit the seeded span), `n_rows_clear` (rows with a
+  positive ridge contrast), `row_pitch_m`, `row_offset_m` (bundle centre minus polygon centre - a per-plot alignment check),
+  `row_contrast`, `row_pitch_share`. The legacy *Detected row count* trait now uses the same detector (the old 5 cm
+  density-peak count reported 1-2 rows where there are 7).
+- **RGB stream in the deep models**: variants `rgb_only` (2-D CNN on the per-plot RGB image, 1 cm in the plot frame,
+  with an inside mask) and `lidar_rgb` (LiDAR cloud + RGB image) for height and biomass. The plot tensors carry an `rgb`
+  image when the flight folder has `plots_rgb` crops, the dataset has `rgb/<flight>/plots`, or the orthomosaic is loaded
+  in *This flight* mode. No bundled weights yet: train on the *Train from scratch* page and use the run folder as weights.
+- **Class-threshold study** (docs/threshold_study): ground 8 cm / canopy 10 cm confirmed as the default; top-of-canopy
+  percentiles and `cth_*` are insensitive, canopy-mass features (H_mean, cover, Pgap, voxel volume) and the pretrained
+  models are not - keep 8 / 10 whenever a bundled model is applied.
+
 # PhenoFuse 4.0.2 (2026-10-16) - pretrained models on a new flight
 
 - **Deep Models on a flight that is already extracted.** The tensor source gained a third option, *Flight folder*: the

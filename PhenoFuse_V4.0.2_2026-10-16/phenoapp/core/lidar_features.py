@@ -58,6 +58,13 @@ import json
 import numpy as np
 
 CANOPY_H, GROUND_H, CELL, VOX = 0.10, 0.08, 0.05, 0.05
+ROW_PITCH_M = None      # seeder row spacing (m) for the row features; None = estimated per plot from the canopy-top periodogram (set_row_pitch)
+
+
+def set_row_pitch(pitch_m):
+    """Fix the seeder row spacing used by the row features (None = estimate per plot)."""
+    global ROW_PITCH_M
+    ROW_PITCH_M = float(pitch_m) if pitch_m else None
 DEFAULT_CANOPY_H, DEFAULT_GROUND_H = CANOPY_H, GROUND_H
 
 
@@ -224,6 +231,17 @@ def lidar_plot_features(px, py, pz, pi, prn, pnr, rx, ry, rz, ri, poly, pre=None
         inorm = pre["inorm"]; ic = pi[canopy] / inorm
         out.update(I_canopy_mean=float(ic.mean()), I_canopy_p50=float(np.median(ic)), I_canopy_p90=float(np.quantile(ic, 0.90)), I_canopy_sd=float(ic.std()),
                    I_ground_norm=float(np.median(pi[ground]) / inorm) if ng > 10 else np.nan, I_ring_median_raw=float(inorm), I_canopy_x_cover=float(ic.mean() * out["cover_5cm"]))
+    # ---- crop rows (4.0.3): seeder-pitch comb on the 2 cm canopy-top ridges across the plot (grid_rows.rows_from_points)
+    try:
+        from .grid_rows import _frame as _row_frame, rows_from_points
+        c0, a_u, a_v, hl_, hw_ = _row_frame(poly)
+        uu = (px - c0[0]) * a_u[0] + (py - c0[1]) * a_u[1]; vv = (px - c0[0]) * a_v[0] + (py - c0[1]) * a_v[1]
+        rw_ = rows_from_points(uu, vv, h, hw_, hl_, pitch_prior=ROW_PITCH_M)
+        out.update(n_rows=int(rw_["n_rows_geom"]), n_rows_clear=int(rw_["n_rows"]), row_pitch_m=float(rw_["pitch"]) if np.isfinite(rw_["pitch"]) else np.nan,
+                   row_offset_m=float(rw_["offset"]) if np.isfinite(rw_["offset"]) else np.nan,
+                   row_contrast=float(np.nanmean(rw_["contrast"])) if len(rw_["contrast"]) else np.nan, row_pitch_share=float(rw_["pitch_share"]))
+    except Exception:
+        out.update(n_rows=0, n_rows_clear=0, row_pitch_m=np.nan, row_offset_m=np.nan, row_contrast=np.nan, row_pitch_share=np.nan)
     out["qc_ok"] = int(out["cover_5cm"] > 0.3 and (pre["ground_cells"] >= 15 or pre["ground_source"] == "inplot_p1") and out["n_noise_removed"] < 0.05 * n)
     return out
 

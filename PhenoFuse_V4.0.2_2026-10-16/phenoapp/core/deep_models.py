@@ -35,6 +35,10 @@ import numpy as np
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 NPIX, MAXPTS = 512, 24000
+RGB_RES, RGB_SHAPE = 0.01, (160, 640)      # RGB plot image in the plot frame: 1 cm pixels, 1.6 m across (v) x 6.4 m along (u); smaller plots are zero-padded
+RGB_VARIANTS = ("rgb_only", "lidar_rgb")   # variants that need the RGB tensor
+LIDAR_VARIANTS = ("two_stream", "lidar_only", "lidar_rgb")
+VNIR_VARIANTS = ("two_stream", "vnir_only")
 
 
 def _pkg_root():
@@ -128,6 +132,58 @@ def _plot_frame(px, py, poly=None):
     return u, v
 
 
+def _rgb_frame_from_mask(mask, transform):
+    """plot frame (centre, long-axis unit vector) from the valid-pixel mask of a per-plot RGB crop."""
+    from shapely.geometry import MultiPoint
+    rr, cc = np.nonzero(mask)
+    if len(rr) < 50: return None
+    k = np.random.default_rng(0).choice(len(rr), min(len(rr), 4000), replace=False)
+    xs = transform.c + (cc[k] + 0.5) * transform.a; ys = transform.f + (rr[k] + 0.5) * transform.e
+    poly = MultiPoint(np.column_stack([xs, ys])).convex_hull
+    return poly
+
+
+def _sample_rgb_canvas(arr, valid, transform, poly):
+    """(4, H, W) uint8 image of the plot in its own frame (u along the long axis, v across) at RGB_RES: R, G, B + inside mask.
+    arr = (3, h, w) array of the source window, valid = (h, w) bool, transform = affine of the window."""
+    from scipy.ndimage import map_coordinates
+    mrr = poly.minimum_rotated_rectangle; co = np.array(mrr.exterior.coords)[:-1]; e = np.diff(np.vstack([co, co[:1]]), axis=0)
+    L = np.hypot(e[:, 0], e[:, 1]); ax_ = e[np.argmax(L)] / L.max(); cxp, cyp = poly.centroid.x, poly.centroid.y
+    H, W = RGB_SHAPE; u = (np.arange(W) + 0.5 - W / 2) * RGB_RES; v = (np.arange(H) + 0.5 - H / 2) * RGB_RES
+    U, V = np.meshgrid(u, v); X = cxp + U * ax_[0] - V * ax_[1]; Y = cyp + U * ax_[1] + V * ax_[0]
+    col = (X - transform.c) / transform.a - 0.5; row = (Y - transform.f) / transform.e - 0.5
+    out = np.zeros((4, H, W), np.uint8)
+    for b in range(3):
+        out[b] = np.clip(map_coordinates(arr[b].astype(np.float32), [row, col], order=1, mode="constant", cval=0.0), 0, 255).astype(np.uint8)
+    m = map_coordinates(valid.astype(np.float32), [row, col], order=0, mode="constant", cval=0.0) > 0.5
+    out[3] = (m * 255).astype(np.uint8); out[:3][:, ~m] = 0
+    return out
+
+
+def rgb_tensor_from_crop(tif_path):
+    """RGB plot image from a per-plot crop written by the RGB Features tab (mask = inside the polygon)."""
+    import rasterio
+    with rasterio.open(tif_path) as src:
+        arr = src.read([1, 2, 3]); valid = src.read_masks(1) > 0
+        if arr.dtype != np.uint8: arr = np.clip(arr.astype(np.float32) / max(float(arr.max()), 1.0) * 255, 0, 255).astype(np.uint8)
+        poly = _rgb_frame_from_mask(valid, src.transform)
+        if poly is None: return None
+        return _sample_rgb_canvas(arr, valid, src.transform, poly)
+
+
+def rgb_tensor_from_ortho(src, poly):
+    """RGB plot image cut from an open orthomosaic dataset around a plot polygon."""
+    from rasterio.windows import from_bounds
+    from rasterio.features import geometry_mask
+    minx, miny, maxx, maxy = poly.buffer(0.3).bounds
+    w = from_bounds(minx, miny, maxx, maxy, src.transform).round_offsets().round_lengths()
+    arr = src.read([1, 2, 3], window=w); tr = src.window_transform(w)
+    if arr.size == 0: return None
+    if arr.dtype != np.uint8: arr = np.clip(arr.astype(np.float32) / max(float(arr.max()), 1.0) * 255, 0, 255).astype(np.uint8)
+    inside = ~geometry_mask([poly], out_shape=arr.shape[1:], transform=tr, invert=False); valid = inside & (arr.sum(0) > 0)
+    return _sample_rgb_canvas(arr, valid, tr, poly)
+
+
 def _pack_points(u, v, h, pi, prn, rng):
     if len(h) > MAXPTS:
         k = rng.choice(len(h), MAXPTS, replace=False); u, v, h, pi, prn = u[k], v[k], h[k], pi[k], prn[k]
@@ -157,8 +213,9 @@ def _write_index(out_dir, idx, dataset_names):
     return idx
 
 
-def prepare_plot_tensors(mgr, cube, plots, out_dir, dataset_name, stage, gt=None, progress_cb=None, region_mode="whole", band_width=0.5):
+def prepare_plot_tensors(mgr, cube, plots, out_dir, dataset_name, stage, gt=None, progress_cb=None, region_mode="whole", band_width=0.5, rgb_tif=None):
     """Write dl_data/<dataset_name>/plot_<id>.npz + dl_data/index.csv for every plot of the CURRENT flight.
+    rgb_tif: optional RGB orthomosaic -> an 'rgb' image tensor per plot (RGB stream variants).
 
     mgr   : loaded LASManager (x, y, z, points with intensity / return_number)
     cube  : VNIRCube
@@ -190,6 +247,9 @@ def prepare_plot_tensors(mgr, cube, plots, out_dir, dataset_name, stage, gt=None
     refl_ok = bool(np.isfinite(ndvi_all).any() and float(np.nanmedian(ndvi_all)) >= 0.05)
     rng = np.random.default_rng(0); rows = []; n = len(plots)
     gtm = gt.set_index("Plot_ID") if gt is not None else None
+    rgb_src = None
+    if rgb_tif and os.path.exists(rgb_tif):
+        import rasterio; rgb_src = rasterio.open(rgb_tif)
     for i, r in plots.iterrows():
         pid = int(r["Plot_ID"]); poly = r.geometry; ring = poly.buffer(1.0).difference(all_buf); bx = ring.bounds
         m = (x >= bx[0]) & (x <= bx[2]) & (y >= bx[1]) & (y <= bx[3]); xs, ys, zs, is_, rn = x[m], y[m], z[m], I[m], RN[m]
@@ -204,11 +264,19 @@ def prepare_plot_tensors(mgr, cube, plots, out_dir, dataset_name, stage, gt=None
         pix, mean_spec, band_mask, fveg = _pack_pixels(S[px_idx].astype(np.float32), wl, veg_t, rng, refl_ok)
         bio = float(gtm.loc[pid, "biomass_kg_ha"]) if (gtm is not None and pid in gtm.index and "biomass_kg_ha" in gtm.columns) else np.nan
         hgt = float(gtm.loc[pid, "height_cm"]) if (gtm is not None and pid in gtm.index and "height_cm" in gtm.columns) else np.nan
+        extra = {}
+        if rgb_src is not None:
+            try:
+                t = rgb_tensor_from_ortho(rgb_src, poly)
+                if t is not None: extra["rgb"] = t
+            except Exception:
+                pass
         np.savez_compressed(os.path.join(out_dir, dataset_name, f"plot_{pid}.npz"), points=pts, pixels=pix, mean_spec=mean_spec, wavelengths=wl.astype(np.float32),
-                            band_mask=band_mask, biomass_kg_ha=bio, height_cm=hgt, fcover_vnir=fveg, vnir_reflectance_ok=int(refl_ok), n_usable_bands=int(band_mask.sum()))
+                            band_mask=band_mask, biomass_kg_ha=bio, height_cm=hgt, fcover_vnir=fveg, vnir_reflectance_ok=int(refl_ok), n_usable_bands=int(band_mask.sum()), **extra)
         rows.append(dict(dataset=dataset_name, stage=stage, Plot_ID=pid, Plot=r.get("Plot", pid), Variety=r.get("Variety", ""), biomass_kg_ha=bio, height_cm=hgt, n_points=len(pts),
-                         n_pixels_region=len(px_idx), fcover_vnir=fveg, vnir_reflectance_ok=int(refl_ok), file=f"{dataset_name}/plot_{pid}.npz"))
+                         n_pixels_region=len(px_idx), fcover_vnir=fveg, vnir_reflectance_ok=int(refl_ok), rgb_ok=int("rgb" in extra), file=f"{dataset_name}/plot_{pid}.npz"))
         if progress_cb and (i % 8 == 0 or i == n - 1): progress_cb(30 + int(70 * (i + 1) / n), f"tensors: plot {i + 1}/{n}")
+    if rgb_src is not None: rgb_src.close()
     return _write_index(out_dir, pd.DataFrame(rows), [dataset_name])
 
 
@@ -272,6 +340,11 @@ def flight_folder_files(folder):
     return las, tif
 
 
+def flight_folder_rgb(folder):
+    """{pid: path} of the per-plot RGB crops of a flight folder (<flight>/plots_rgb/plot_<id>_*.tif, RGB Features tab)."""
+    return per_plot_files(os.path.join(folder or "", "plots_rgb"), ".tif")
+
+
 def prepare_tensors_from_dataset(dataset_dir, flights, out_dir, progress_cb=None, variant="two_stream"):
     """Write dl_data tensors for every selected flight of a dataset folder (lidar/<flight>/plots/*.las and
     vnir/<flight>/plots/plot_<id>_*.tif + ground_truth.csv). variant 'lidar_only' / 'vnir_only' needs only that modality."""
@@ -281,8 +354,9 @@ def prepare_tensors_from_dataset(dataset_dir, flights, out_dir, progress_cb=None
         meta = man.get("flights", {}).get(fl, {})
         ldir = os.path.join(dataset_dir, "lidar", fl, "plots"); vdir = os.path.join(dataset_dir, "vnir", fl, "plots")
         g = gt_path(dataset_dir, fl)
-        specs.append(dict(name=fl, stage=meta.get("stage", ""), las_files=per_plot_files(ldir, ".las"), tif_files=per_plot_files(vdir, ".tif"),
-                          gt=read_csv(g) if g else None, lidar_dir=ldir, vnir_dir=vdir))
+        rdir = os.path.join(dataset_dir, "rgb", fl, "plots")
+        specs.append(dict(name=fl, stage=meta.get("stage", ""), las_files=per_plot_files(ldir, ".las"), tif_files=per_plot_files(vdir, ".tif"), rgb_files=per_plot_files(rdir, ".tif"),
+                          gt=read_csv(g) if g else None, lidar_dir=ldir, vnir_dir=vdir, rgb_dir=rdir))
     return prepare_tensors_from_files(specs, out_dir, progress_cb=progress_cb, variant=variant)
 
 
@@ -292,7 +366,8 @@ def prepare_tensors_from_flight_folder(folder, name, stage, out_dir, gt_csv=None
     from .dataset import read_csv
     las, tif = flight_folder_files(folder)
     gt = read_csv(gt_csv) if gt_csv and os.path.exists(gt_csv) else None
-    spec = dict(name=name, stage=stage, las_files=las, tif_files=tif, gt=gt, lidar_dir=os.path.join(folder, "plots_lidar"), vnir_dir=os.path.join(folder, "plots_vnir"))
+    spec = dict(name=name, stage=stage, las_files=las, tif_files=tif, rgb_files=flight_folder_rgb(folder), gt=gt, lidar_dir=os.path.join(folder, "plots_lidar"),
+                vnir_dir=os.path.join(folder, "plots_vnir"), rgb_dir=os.path.join(folder, "plots_rgb"))
     return prepare_tensors_from_files([spec], out_dir, progress_cb=progress_cb, variant=variant)
 
 
@@ -301,15 +376,19 @@ def prepare_tensors_from_files(specs, out_dir, progress_cb=None, variant="two_st
     variant 'lidar_only' / 'vnir_only' needs only that modality."""
     import pandas as pd
     rng = np.random.default_rng(0); rows = []; flights = [sp["name"] for sp in specs]
-    need_lidar = variant != "vnir_only"; need_vnir = variant != "lidar_only"
+    need_lidar = variant in LIDAR_VARIANTS; need_vnir = variant in VNIR_VARIANTS; need_rgb = variant in RGB_VARIANTS
     for fi, sp in enumerate(specs):
-        fl = sp["name"]; stage = sp.get("stage", "") or ""; las_files = sp["las_files"]; tif_files = sp["tif_files"]
+        fl = sp["name"]; stage = sp.get("stage", "") or ""; las_files = sp["las_files"]; tif_files = sp["tif_files"]; rgb_files = sp.get("rgb_files") or {}
         if need_lidar and not las_files:
             raise RuntimeError(f"{fl}: no per-plot LAS files (plot_<id>_*.las) in {sp.get('lidar_dir', '?')}")
         if need_vnir and not tif_files:
             raise RuntimeError(f"{fl}: no per-plot VNIR cubes (plot_<id>_*.tif) in {sp.get('vnir_dir', '?')}")
-        pids = sorted((set(las_files) if need_lidar else set(tif_files)) & (set(tif_files) if need_vnir else set(las_files)) if (need_lidar and need_vnir)
-                      else (set(las_files) if need_lidar else set(tif_files)))
+        if need_rgb and not rgb_files:
+            raise RuntimeError(f"{fl}: no per-plot RGB crops (plot_<id>_*.tif) in {sp.get('rgb_dir', '?')} - run the RGB Features tab first")
+        sets = [set(d) for d, need in ((las_files, need_lidar), (tif_files, need_vnir), (rgb_files, need_rgb)) if need]
+        pids = sorted(set.intersection(*sets)) if sets else []
+        if not pids:
+            raise RuntimeError(f"{fl}: no plot has every input needed by variant {variant}")
         gt = sp.get("gt")
         gtm = None
         if gt is not None and "Plot_ID" in gt.columns:
@@ -343,12 +422,20 @@ def prepare_tensors_from_files(specs, out_dir, progress_cb=None, variant="two_st
                 else:
                     wl = np.linspace(400, 1000, 172) if wl is None else wl
                     pix = np.zeros((NPIX, len(wl)), np.float32); mean_spec = np.zeros(len(wl), np.float32); band_mask = np.zeros(len(wl), np.uint8); fveg = np.nan
+                extra = {}
+                if pid in rgb_files:
+                    try:
+                        t = rgb_tensor_from_crop(rgb_files[pid])
+                        if t is not None: extra["rgb"] = t
+                    except Exception:
+                        pass
+                if need_rgb and "rgb" not in extra: continue
                 bio = float(gtm.loc[pid, "biomass_kg_ha"]) if (gtm is not None and pid in gtm.index and "biomass_kg_ha" in gtm.columns) else np.nan
                 hgt = float(gtm.loc[pid, "height_cm"]) if (gtm is not None and pid in gtm.index and "height_cm" in gtm.columns) else np.nan
-                np.savez_compressed(os.path.join(out_dir, fl, f"plot_{pid}.npz"), points=pts, pixels=pix, mean_spec=mean_spec, wavelengths=np.asarray(wl, np.float32),
+                np.savez_compressed(os.path.join(out_dir, fl, f"plot_{pid}.npz"), points=pts, pixels=pix, mean_spec=mean_spec, wavelengths=np.asarray(wl, np.float32), **extra,
                                     band_mask=band_mask, biomass_kg_ha=bio, height_cm=hgt, fcover_vnir=fveg, vnir_reflectance_ok=int(refl_ok), n_usable_bands=int(band_mask.sum()))
                 rows.append(dict(dataset=fl, stage=stage, Plot_ID=pid, Plot=pid, Variety="", biomass_kg_ha=bio, height_cm=hgt, n_points=len(pts),
-                                 n_pixels_region=len(sp) if need_vnir else 0, fcover_vnir=fveg, vnir_reflectance_ok=int(refl_ok), file=f"{fl}/plot_{pid}.npz"))
+                                 n_pixels_region=len(sp) if need_vnir else 0, fcover_vnir=fveg, vnir_reflectance_ok=int(refl_ok), rgb_ok=int("rgb" in extra), file=f"{fl}/plot_{pid}.npz"))
             except Exception as e:
                 rows.append(dict(dataset=fl, stage=stage, Plot_ID=pid, error=str(e)[:120]))
             if progress_cb and (i % 5 == 0 or i == len(pids) - 1):

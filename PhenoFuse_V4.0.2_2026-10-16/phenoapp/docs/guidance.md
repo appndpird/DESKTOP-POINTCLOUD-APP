@@ -142,6 +142,48 @@ numbers on a new flight, read the notes under the prediction:
 - Keep the LiDAR preprocessing the same as the training run: the research models were trained with per-plot noise
   removal on (rule `sor`); with the noise rule set to `gap` nothing is removed and the density features shift a little.
 
+### Correct the grid from the crop rows (4.0.3)
+
+A grid drawn from the trial design or aligned on a coarse canopy raster is typically 10-30 cm off the seeded rows, and
+later flights of the same trial are often georeferenced 0.1-0.4 m apart. The Edit tab's **Correct grid from rows (LiDAR)**
+action fixes both from the point cloud itself. Per plot it bins the cloud at 2 cm in the plot frame (along u, across v)
+with a margin, builds a ground model (5th percentile of the cell minima in 30 cm blocks), the canopy top (cell max minus
+ground), cover (top > 10 cm) and ground visibility (cell minimum within 5 cm of the ground = where the laser reached the
+soil, i.e. the plant bases). The wheel tracks between plots are the minima of the range-folded profile; a periodic comb
+(pitch + phase) is fitted per range, so one noisy plot cannot move itself. Each plot is re-centred between its two tracks
+(across) and on the alleys at its ends (along: 40 % drop of the plant-base profile), with the same margin at both ends.
+The rows are a second comb inside the seeded span: the seeder pitch comes from the periodogram of all plots and only the
+phase is fitted per plot; each row gets a ridge contrast, so a lodged or missing row shows up as "weak".
+
+- **Fit plots to rows**: run it ONCE on the flight with the clearest rows (open canopy, e.g. anthesis). This is the trial's
+  reference grid; every plot polygon is re-fitted.
+- **Register grid to this flight**: load the reference grid on another flight of the same trial and apply ONE rigid shift
+  (median across / along offset measured on that cloud). Do not re-fit plots individually on a closed, leaning canopy:
+  at maturity the canopy overhangs the tracks (the canopy top dips only ~17 cm in a 73 cm canopy) and the across position
+  of single plots scatters by +-25 cm.
+- Outputs next to the grid: `<grid>_corrected.shp` (polygons with `n_rows`, `n_rows_ok`, `row_pitch`, `row_off`,
+  `seeded_w`, `crop_len`, `along_off`, `across_off`, `refine_ok`, `fit_src`), `_rows.shp` (one line per row: `Plot_ID`,
+  `row_idx`, `v_off_m`, `length_m`), `_rows.csv`, `_report.csv`, `_diag.json`, `_qa.png` (largest corrections + the
+  range-folded track profiles with the fitted comb) and `rows_gallery/` (every plot). The Features tabs use the
+  corrected grid from then on.
+- Row features in `lidar_features.csv`: `n_rows`, `n_rows_clear`, `row_pitch_m`, `row_offset_m` (bundle centre minus
+  polygon centre: a per-plot check of the grid), `row_contrast` (ridge minus mid-gap: falls with canopy closure and
+  lodging) and `row_pitch_share`. The row lines let later analyses drop border rows, profile a plot row by row, or
+  detect seeding gaps early in the season.
+- Muresk NUE 2025 check: the anthesis fit is self-consistent to 0.5 cm across and 0 cm along, every plot has 7 rows at
+  22.6 cm (seeded width 1.52 m between 0.48 m tracks at a 2.00 m pitch), and the maturity flight sits 0.33 m further
+  along the rows and 0.2 m across than the anthesis flight - the registered reference grid lines up with the row stripes
+  of the maturity orthomosaic where the maturity-fitted grid did not.
+
+### RGB stream in the deep models (4.0.3)
+
+Variants `rgb_only` and `lidar_rgb` add a 2-D CNN on the per-plot RGB image (R, G, B + inside mask, 1 cm pixels, 1.6 x
+6.4 m canvas in the plot frame, smaller plots zero-padded). If you have VNIR, RGB adds no new wavelengths - its value is
+texture (heads, lodging) and the flights that have no VNIR or clipped VNIR bands, so LiDAR + RGB is the fusion to use
+there. The RGB variants have no bundled weights: train them from scratch (the tensors need `plots_rgb` crops, an
+`rgb/<flight>/plots` dataset folder, or the loaded orthomosaic in *This flight* mode), then point the pretrained page at
+the run folder.
+
 ### Deep Models on an extracted flight (4.0.2)
 
 The pretrained deep ensembles need plot tensors, and the Deep Models tab can build them from three sources: *This flight*

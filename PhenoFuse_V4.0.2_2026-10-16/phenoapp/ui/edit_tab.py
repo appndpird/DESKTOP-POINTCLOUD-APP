@@ -228,6 +228,38 @@ class _RefineWorker(QThread):
             self.error.emit(f"{e}\n\n{traceback.format_exc()}")
 
 
+class _RowFitWorker(QThread):
+    """Correct the grid from the crop rows / wheel tracks in the point cloud (core.grid_rows), or register it rigidly."""
+    progress = pyqtSignal(int, str)
+    done_ok  = pyqtSignal(dict)
+    error    = pyqtSignal(str)
+
+    def __init__(self, kw):
+        super().__init__(); self._kw = kw
+
+    def run(self):
+        try:
+            kw = self._kw
+            from phenoapp.core.grid_rows import (bin_plot_windows, bin_raster_windows, correct_grid_from_rows,
+                                                 save_row_outputs, render_rows_qa, render_rows_gallery)
+            if kw.get("las_path") and os.path.exists(kw["las_path"]):
+                win = bin_plot_windows(kw["las_path"], kw["gdf"], progress_cb=lambda p, m: self.progress.emit(int(p), m))
+            else:
+                win = bin_raster_windows(kw["raster"], kw["gdf"], progress_cb=lambda p, m: self.progress.emit(int(p), m))
+            new, rows, rep, diag = correct_grid_from_rows(win, kw["gdf"], mode=kw.get("mode", "per_plot"), row_pitch_m=kw.get("row_pitch_m"),
+                                                          margin_m=kw.get("margin_m", 0.15), progress_cb=lambda p, m: self.progress.emit(int(p), m))
+            stem = os.path.splitext(kw["out_shp"])[0]
+            paths = save_row_outputs(stem, new, rows, rep, diag)
+            paths["qa"] = render_rows_qa(win, kw["gdf"], new, rows, rep, diag, stem + "_qa.png")
+            if kw.get("gallery", True):
+                paths["gallery"] = render_rows_gallery(win, new, rep, os.path.join(os.path.dirname(stem), "rows_gallery"), prefix=os.path.basename(stem) + "_gallery")
+            self.progress.emit(100, "done")
+            self.done_ok.emit(dict(gdf=new, diag={k: v for k, v in diag.items() if not k.startswith("_")}, out_shp=paths["grid"], paths=paths, report=rep))
+        except Exception as e:
+            import traceback
+            self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+
 class EditTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -273,6 +305,7 @@ class EditTab(QWidget):
         tb.addSeparator()
         tb.addAction("⟲ Auto-align to canopy", self.auto_align)
         tb.addAction("✚ Refine plots to crop (CHM)", self.refine_to_crop)
+        tb.addAction("▦ Correct grid from rows (LiDAR)", self.correct_from_rows)
         tb.addAction("Undo (Z)",  self.undo)
         tb.addAction("Reset",     self.reset)
         tb.addSeparator()
@@ -616,6 +649,99 @@ class EditTab(QWidget):
             f"Mean CHM inside plots: {d['mean_chm_inside_before']:.3f} -> {d['mean_chm_inside_after']:.3f} m\n\n"
             f"Saved: {res['out_shp']}\nReport: {res['report_csv']}\nQA figure: {res['qa_png']}\n\n"
             "The LiDAR / VNIR / RGB Features tabs now use the refined grid.")
+
+    def correct_from_rows(self):
+        """Grid correction from the crop rows and wheel tracks in the point cloud (4.0.3, core.grid_rows):
+        per plot on a reference flight (open canopy), or a rigid registration of a reference grid to this flight."""
+        s = state()
+        has_las = bool(s.las_path and os.path.exists(s.las_path))
+        raster = s.canopy_tif if (s.canopy_tif and os.path.exists(s.canopy_tif)) else ""
+        if not has_las and not raster:
+            QMessageBox.warning(self, "No point cloud", "Load a project with a LAS/LAZ point cloud first (a canopy raster works too, without ground visibility).")
+            return
+        plots = self._all_plots()
+        if not plots or self._grid_attrs is None:
+            QMessageBox.warning(self, "No grid", "Click 'Reload from Project' first to load plots.")
+            return
+        if "Plot_ID" not in self._grid_attrs.columns:
+            QMessageBox.warning(self, "No Plot_ID", "The grid needs a Plot_ID column.")
+            return
+        box = QMessageBox(self); box.setWindowTitle("Correct grid from rows")
+        box.setText("How should the grid be corrected on this flight?")
+        box.setInformativeText(
+            "Fit plots to rows: every plot is re-centred between its two wheel tracks and on the alleys at its ends, and the crop rows are "
+            "detected (seeder pitch + per-plot comb). Use it ONCE on the flight with the clearest rows (open canopy, e.g. anthesis) to make the "
+            "trial's reference grid.\n\n"
+            "Register grid to this flight: the loaded grid (the reference) is moved as a whole by the median across / along shift measured on this "
+            "cloud; plots and rows keep their geometry. Use it on later flights (closed or leaning canopy) - flight-to-flight georeferencing "
+            "offsets of 0.1-0.5 m are common.\n\n"
+            "Outputs next to the grid: <grid>_corrected.shp (+ _rows.shp, _rows.csv, _report.csv, _diag.json, _qa.png, rows_gallery/).")
+        b_fit = box.addButton("Fit plots to rows", QMessageBox.AcceptRole)
+        b_reg = box.addButton("Register grid to this flight", QMessageBox.AcceptRole)
+        box.addButton(QMessageBox.Cancel); box.exec_()
+        if box.clickedButton() is b_fit:
+            mode = "per_plot"
+        elif box.clickedButton() is b_reg:
+            mode = "rigid"
+        else:
+            return
+        from PyQt5.QtWidgets import QInputDialog
+        default = ""
+        if mode == "rigid" and "row_pitch" in self._grid_attrs.columns:
+            try:
+                default = f"{float(self._grid_attrs['row_pitch'].median()):.3f}"
+            except Exception:
+                default = ""
+        txt, ok = QInputDialog.getText(self, "Seeder row spacing", "Row spacing in metres (blank = estimate from this flight):", text=default)
+        if not ok:
+            return
+        try:
+            pitch = float(txt) if txt.strip() else None
+        except ValueError:
+            pitch = None
+        polys = [it.shapely() for it in sorted(plots, key=lambda x: x.plot_idx)]
+        gdf = gpd.GeoDataFrame(self._grid_attrs.copy(), geometry=polys, crs=self._grid_crs)
+        anchor = s.las_path if has_las else raster
+        out_shp = (s.saved_grid or s.grid_path or os.path.join(os.path.dirname(anchor), "aligned_grid.shp"))
+        out_shp = os.path.splitext(out_shp)[0]
+        for suf in ("_corrected", "_refit"):
+            out_shp = out_shp.replace(suf, "")
+        out_shp += "_corrected.shp"
+        self.lbl_status.setText("Reading the point cloud around every plot (one pass)...")
+        self._rowfit_worker = _RowFitWorker(dict(las_path=s.las_path if has_las else "", raster=raster, gdf=gdf, out_shp=out_shp, mode=mode, row_pitch_m=pitch))
+        self._rowfit_worker.done_ok.connect(self._on_rowfit)
+        self._rowfit_worker.error.connect(lambda e: QMessageBox.critical(self, "Grid correction failed", e))
+        self._rowfit_worker.progress.connect(lambda p, m: self.lbl_status.setText(f"[{p}%] {m}"))
+        self._rowfit_worker.start()
+
+    def _on_rowfit(self, res):
+        s = state(); new = res["gdf"]; d = res["diag"]; paths = res["paths"]
+        self.push_undo()
+        plots = sorted(self._all_plots(), key=lambda x: x.plot_idx)
+        for it, geom in zip(plots, new.geometry):
+            it.setPolygon(shp_to_qpoly(geom))
+        for col in ("plot_len", "along_off", "across_off", "crop_len", "seeded_w", "n_rows", "n_rows_ok", "row_pitch", "row_off", "refine_ok", "fit_src"):
+            if col in new.columns:
+                self._grid_attrs[col] = list(new[col].values)
+        s.saved_grid = res["out_shp"]
+        self.lbl_status.setText(f"Corrected grid saved → {res['out_shp']} (Undo reverts the view; the file stays)")
+        combs = ", ".join(f"{g}: pitch {c['pitch']:.2f} m, {c['n_minima']} tracks" for g, c in d["comb_by_group"].items())
+        rows = ", ".join(f"{k} rows: {v} plots" for k, v in d["rows_per_plot"].items())
+        if d.get("mode") == "rigid":
+            head = (f"Rigid registration of the loaded grid to this flight: across {d['across_mean_m'] * 100:+.1f} cm, along {d['along_mean_m'] * 100:+.1f} cm "
+                    f"(median of {d['n_across_ok']} / {d['n_along_ok']} measured plots; lengths kept).")
+        else:
+            head = (f"Per-plot fit: across |shift| median {d['across_abs_median_m'] * 100:.0f} cm (p90 {d['across_abs_p90_m'] * 100:.0f}), along mean {d['along_mean_m'] * 100:+.0f} cm; "
+                    f"seeded length median {(d['crop_len_median_m'] or float('nan')):.2f} m -> polygon {d['new_len_median_m']:.2f} m (margin {d['margin_m']:.2f} m each end); "
+                    f"seeded width median {d['seeded_w_median_m']:.2f} m (polygon width kept).")
+        gal = os.path.dirname(paths["gallery"][0]) if paths.get("gallery") else "-"
+        QMessageBox.information(self, "Grid corrected from rows",
+            f"Evidence: tracks from '{d['evidence_across']}', alleys from '{d['evidence_along']}' ({d['source']}); canopy top median {d['canopy_m']:.2f} m.\n"
+            f"Track combs per range: {combs}; track width {d['track_width_m']:.2f} m.\n\n{head}\n\n"
+            f"Rows: seeder pitch {((d.get('row_pitch_used_m') or 0) * 100):.1f} cm" + ("" if d.get("rows_reliable") else " (pitch spread between plots is large - check the gallery, or enter the spacing)") +
+            f"; {rows}.\n\n"
+            f"Saved: {res['out_shp']}\nRows: {paths.get('rows', '-')}\nReport: {paths.get('report')}\nQA: {paths.get('qa')}\nGallery: {gal}\n\n"
+            "The LiDAR / VNIR / RGB Features tabs now use the corrected grid.")
 
     def save_grid(self):
         if self._grid_attrs is None or not self._all_plots():

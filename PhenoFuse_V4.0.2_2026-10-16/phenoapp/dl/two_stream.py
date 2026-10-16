@@ -18,6 +18,8 @@ import os, sys, json, math, argparse, time
 import numpy as np
 
 VOX = 0.02; GRID = (256, 96, 96); NPIX = 512
+LIDAR_VARIANTS = ("two_stream", "lidar_only", "lidar_rgb"); VNIR_VARIANTS = ("two_stream", "vnir_only"); RGB_VARIANTS = ("rgb_only", "lidar_rgb")
+ALL_VARIANTS = ("two_stream", "lidar_only", "vnir_only", "rgb_only", "lidar_rgb")
 
 
 def probe():
@@ -46,7 +48,7 @@ def pick_device(req):
 
 def build(variant, nds, device):
     import torch, torch.nn as nn
-    use_spconv = variant != "vnir_only"
+    use_spconv = variant in LIDAR_VARIANTS
     if use_spconv:
         import spconv.pytorch as spconv
         algo = spconv.ConvAlgo.Native if device.type == "cpu" else None
@@ -74,16 +76,28 @@ def build(variant, nds, device):
             self.enc = nn.TransformerEncoder(nn.TransformerEncoderLayer(d, 4, 128, dropout=0.1, batch_first=True), 2); self.out = nn.Sequential(nn.Linear(d, 128), nn.ReLU(), nn.Dropout(0.2))
         def forward(self, spec): return self.out(self.enc(self.emb(spec)).mean(1))
 
+    class RgbStream(nn.Module):
+        """small 2-D CNN on the plot image in its own frame (R, G, B + inside mask; 1 cm, 160 x 640): five stride-2 blocks, global max + mean pool."""
+        def __init__(self, cin=4, w=16):
+            super().__init__()
+            def block(i, o): return nn.Sequential(nn.Conv2d(i, o, 3, stride=2, padding=1, bias=False), nn.BatchNorm2d(o), nn.ReLU(), nn.Conv2d(o, o, 3, padding=1, bias=False), nn.BatchNorm2d(o), nn.ReLU())
+            self.net = nn.Sequential(block(cin, w), block(w, 2 * w), block(2 * w, 4 * w), block(4 * w, 8 * w), block(8 * w, 8 * w))
+            self.out = nn.Sequential(nn.Linear(16 * w, 128), nn.ReLU(), nn.Dropout(0.2))
+        def forward(self, img):
+            f = self.net(img); return self.out(torch.cat([f.amax((2, 3)), f.mean((2, 3))], 1))
+
     class TwoStream(nn.Module):
         def __init__(self):
             super().__init__(); self.variant = variant
-            self.lidar = LidarStream() if variant != "vnir_only" else None; self.spec = SpecStream() if variant != "lidar_only" else None
-            self.ds_emb = nn.Embedding(nds, 8); d = 128 * (2 if variant == "two_stream" else 1) + 8
+            self.lidar = LidarStream() if variant in LIDAR_VARIANTS else None; self.spec = SpecStream() if variant in VNIR_VARIANTS else None
+            self.rgb = RgbStream() if variant in RGB_VARIANTS else None
+            self.ds_emb = nn.Embedding(nds, 8); d = 128 * sum(x is not None for x in (self.lidar, self.spec, self.rgb)) + 8
             self.head = nn.Sequential(nn.Linear(d, 64), nn.ReLU(), nn.Dropout(0.3), nn.Linear(64, 1))
-        def forward(self, coords, feats, spec, ds, bs):
+        def forward(self, coords, feats, spec, ds, bs, rgb=None):
             parts = []
             if self.lidar is not None: parts.append(self.lidar(coords, feats, bs))
             if self.spec is not None: parts.append(self.spec(spec))
+            if self.rgb is not None: parts.append(self.rgb(rgb))
             parts.append(self.ds_emb(ds)); return self.head(torch.cat(parts, 1)).squeeze(1)
     return TwoStream().to(device)
 
@@ -99,14 +113,24 @@ def load_common_bands(weights_dir, wl):
     return np.array([bool(cok[np.argmin(np.abs(cw - w))]) and abs(cw[np.argmin(np.abs(cw - w))] - w) < 0.5 for w in wl])
 
 
-def make_sample(z, train, rng, excl, maxpts=16000, common=None):
+def make_sample(z, train, rng, excl, maxpts=16000, common=None, need_rgb=False):
     """common: bool mask of the fixed band list (identical for every plot); None = per-plot policy (band_mask in the
-    tensor file when present, clipped pixels and excluded ranges)."""
+    tensor file when present, clipped pixels and excluded ranges). need_rgb: also return the (4, H, W) plot image."""
     import torch
     pts = z["points"].astype(np.float32); pix = z["pixels"].astype(np.float32)
+    rgb = None
+    if need_rgb:
+        if "rgb" not in z.files: raise SystemExit("this tensor set has no 'rgb' images - prepare the plot tensors again with the RGB crops / orthomosaic available")
+        rgb = z["rgb"].astype(np.float32) / 255.0
+    flip_u = flip_v = False
     if train:
-        if rng.random() < 0.5: pts[:, 0] = -pts[:, 0]; pts[:, 1] = -pts[:, 1]
-        if rng.random() < 0.5: pts[:, 1] = -pts[:, 1]
+        flip_u = rng.random() < 0.5; flip_v = rng.random() < 0.5
+        if flip_u: pts[:, 0] = -pts[:, 0]
+        if flip_v: pts[:, 1] = -pts[:, 1]
+        if rgb is not None:
+            if flip_u: rgb = rgb[:, :, ::-1]
+            if flip_v: rgb = rgb[:, ::-1, :]
+            rgb = rgb.copy(); rgb[:3] = np.clip(rgb[:3] * rng.uniform(0.85, 1.15) + rng.normal(0, 0.02), 0, 1)
         keep = rng.random(len(pts)) > rng.uniform(0, 0.3); pts = pts[keep]; pts[:, :2] += rng.normal(0, 0.01, (len(pts), 2)).astype(np.float32)
         pix = pix[rng.choice(len(pix), len(pix), replace=True)] * rng.uniform(0.9, 1.1)
     if len(pts) > maxpts:
@@ -126,20 +150,26 @@ def make_sample(z, train, rng, excl, maxpts=16000, common=None):
     mu = (sp * valid).sum(1, keepdims=True) / nv; sd = np.sqrt(((sp - mu) ** 2 * valid).sum(1, keepdims=True) / nv) + 1e-6
     sp = np.where(valid, (sp - mu) / sd, 0).astype(np.float32)
     sp = np.concatenate([sp, valid.astype(np.float32)], 1)          # values + availability mask -> 2 x bands per pixel
-    return torch.from_numpy(coords), torch.from_numpy(feats), torch.from_numpy(sp)
+    if rgb is not None:
+        rgb[:3] = rgb[:3] - 0.5
+        return torch.from_numpy(coords), torch.from_numpy(feats), torch.from_numpy(sp), torch.from_numpy(np.ascontiguousarray(rgb))
+    return torch.from_numpy(coords), torch.from_numpy(feats), torch.from_numpy(sp), None
 
 
-def batches(idx, data_dir, ds_id, train, rng, excl, bs=16, device=None, tcol=None, common=None):
+def batches(idx, data_dir, ds_id, train, rng, excl, bs=16, device=None, tcol=None, common=None, need_rgb=False):
+    """yields (coords, feats, spec, ds, y, index, rgb-or-None)"""
     import torch
     order = rng.permutation(len(idx)) if train else np.arange(len(idx))
     for s in range(0, len(order), bs):
         rows = idx.iloc[order[s:s + bs]]
         if train and len(rows) == 1: continue
-        C, F, S, D, Y, I = [], [], [], [], [], []
+        C, F, S, D, Y, I, R = [], [], [], [], [], [], []
         for k, (_, r) in enumerate(rows.iterrows()):
-            z = np.load(os.path.join(data_dir, r.file)); c, f, sp = make_sample(z, train, rng, excl, common=common)
+            z = np.load(os.path.join(data_dir, r.file)); c, f, sp, im = make_sample(z, train, rng, excl, common=common, need_rgb=need_rgb)
             C.append(torch.cat([torch.full((len(c), 1), k, dtype=torch.int32), c], 1)); F.append(f); S.append(sp); D.append(ds_id.get(r.dataset, 0)); Y.append(float(r[tcol]) if tcol and tcol in r and np.isfinite(r[tcol]) else np.nan); I.append(int(r.name))
-        yield (torch.cat(C).to(device), torch.cat(F).to(device), torch.stack(S).to(device), torch.tensor(D).to(device), torch.tensor(Y, dtype=torch.float32), np.array(I))
+            if im is not None: R.append(im)
+        yield (torch.cat(C).to(device), torch.cat(F).to(device), torch.stack(S).to(device), torch.tensor(D).to(device), torch.tensor(Y, dtype=torch.float32), np.array(I),
+               torch.stack(R).to(device) if R else None)
 
 
 def metrics(p, y):
@@ -149,7 +179,7 @@ def metrics(p, y):
 
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("mode", choices=["probe", "predict", "train"]); ap.add_argument("--data"); ap.add_argument("--weights"); ap.add_argument("--target", default="biomass")
-    ap.add_argument("--out"); ap.add_argument("--device", default="auto"); ap.add_argument("--variant", default="two_stream"); ap.add_argument("--epochs", type=int, default=100); ap.add_argument("--folds", type=int, default=10)
+    ap.add_argument("--out"); ap.add_argument("--device", default="auto"); ap.add_argument("--variant", default="two_stream", choices=list(ALL_VARIANTS)); ap.add_argument("--epochs", type=int, default=100); ap.add_argument("--folds", type=int, default=10)
     ap.add_argument("--bands", default="common", choices=["common", "per_plot"],
                     help="training only: 'common' = the fixed band list of common_bands.csv (next to this script's bundled weights, or --bands-csv), identical for every plot; "
                          "'per_plot' = every band usable on the plot with the availability mask. Prediction follows the ensemble: common when its folder holds common_bands.csv.")
@@ -165,9 +195,12 @@ def main():
         print(json.dumps(probe())); return
     import torch, torch.nn as nn, torch.nn.functional as Fn, pandas as pd
     dev = pick_device(a.device); print(f"[two_stream] device: {dev} ({torch.cuda.get_device_name(0) if dev.type == 'cuda' else 'cpu'})", flush=True)
-    if a.variant != "vnir_only":
+    if a.variant in LIDAR_VARIANTS:
         try: import spconv.pytorch  # noqa
-        except Exception: print("[two_stream] spconv not installed - falling back to the VNIR-only stream", flush=True); a.variant = "vnir_only"
+        except Exception:
+            fb = {"two_stream": "vnir_only", "lidar_only": "vnir_only", "lidar_rgb": "rgb_only"}[a.variant]
+            print(f"[two_stream] spconv not installed - falling back to the {fb} stream", flush=True); a.variant = fb
+    need_rgb = a.variant in RGB_VARIANTS
     idx = pd.read_csv(os.path.join(a.data, "index.csv")); tcol = "biomass_kg_ha" if a.target == "biomass" else "height_cm"
     wl = np.load(os.path.join(a.data, idx.file.iloc[0]))["wavelengths"]; excl = np.zeros(len(wl), bool)
     for part in (a.excluded or "").split(","):
@@ -215,8 +248,8 @@ def main():
             with torch.no_grad():
                 for j in range(nrep):
                     ds_id = {d: v[min(j, len(v) - 1)] for d, v in emb.items()}
-                    for C, F, S, D, Y, I in batches(idx, a.data, ds_id, False, rng, excl, device=dev, common=common):
-                        p = model(C, F, S, D, len(I)).cpu().numpy() * norm[1] + norm[0]; preds[k, I] += (np.exp(p) if ylog else p) / nrep
+                    for C, F, S, D, Y, I, R in batches(idx, a.data, ds_id, False, rng, excl, device=dev, common=common, need_rgb=need_rgb):
+                        p = model(C, F, S, D, len(I), rgb=R).cpu().numpy() * norm[1] + norm[0]; preds[k, I] += (np.exp(p) if ylog else p) / nrep
             print(f"[two_stream] fold model {k+1}/{len(files)} done", flush=True)
         if any(len(v) > 1 for v in emb.values()):
             print("[two_stream] new dataset(s) " + ", ".join(d for d, v in emb.items() if len(v) > 1) + ": predictions averaged over the training embeddings of the same stage; calibrate with a few measured plots (offset) for absolute values", flush=True)
@@ -260,16 +293,16 @@ def main():
         steps = epochs * math.ceil(len(rows) / 16); sched = torch.optim.lr_scheduler.OneCycleLR(opt, lr, total_steps=steps)
         for ep in range(epochs):
             model.train()
-            for C, F, S, D, Y, I in batches(rows, a.data, ds_id, True, rng, excl, device=dev, tcol=tcol, common=common):
-                yn = ((torch.log(Y) if ylog else Y) - ymu) / ysd; loss = Fn.smooth_l1_loss(model(C, F, S, D, len(I)), yn.to(dev), beta=0.5)
+            for C, F, S, D, Y, I, R in batches(rows, a.data, ds_id, True, rng, excl, device=dev, tcol=tcol, common=common, need_rgb=need_rgb):
+                yn = ((torch.log(Y) if ylog else Y) - ymu) / ysd; loss = Fn.smooth_l1_loss(model(C, F, S, D, len(I), rgb=R), yn.to(dev), beta=0.5)
                 opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(model.parameters(), 2.0); opt.step(); sched.step()
         return model
     pred = np.full(len(idx), np.nan); folds = min(a.folds, len(idx))
     for fold, (tr, te) in enumerate(KFold(folds, shuffle=True, random_state=0).split(idx)):
         t = time.time(); model = train_one(idx.iloc[tr], a.epochs, fold); model.eval()
         with torch.no_grad():
-            for C, F, S, D, Y, I in batches(idx.iloc[te], a.data, ds_id, False, rng, excl, device=dev, common=common):
-                p = model(C, F, S, D, len(I)).cpu().numpy() * ysd + ymu; pred[I] = np.exp(p) if ylog else p
+            for C, F, S, D, Y, I, R in batches(idx.iloc[te], a.data, ds_id, False, rng, excl, device=dev, common=common, need_rgb=need_rgb):
+                p = model(C, F, S, D, len(I), rgb=R).cpu().numpy() * ysd + ymu; pred[I] = np.exp(p) if ylog else p
         torch.save(model.state_dict(), os.path.join(a.out, f"{a.variant}_{a.target}_fold{fold}.pt"))
         print(f"[two_stream] fold {fold+1}/{folds}: {json.dumps({k_: round(v, 3) for k_, v in metrics(pred[te], y_all[te]).items()})} ({time.time()-t:.0f}s)", flush=True)
     m = metrics(pred, y_all); print("[two_stream] CV:", json.dumps({k_: round(v, 3) for k_, v in m.items()}), flush=True)

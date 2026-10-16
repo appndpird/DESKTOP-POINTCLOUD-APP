@@ -509,7 +509,7 @@ def compute_plot_traits(
     if want("roughness"):
         out["roughness"] = _roughness(x, y, z_use, cell=0.10)
     if want("row_count"):
-        out["row_count"] = _row_count(x, y, polygon)
+        out["row_count"] = _row_count(x, y, polygon, z_use)
 
     return out
 
@@ -619,9 +619,18 @@ def _roughness(x, y, z, cell=0.10):
     return float(np.std(zmax)) if len(zmax) > 0 else 0.0
 
 
-def _row_count(x, y, polygon):
-    """Count peaks in cross-row density. Uses minimum rotated rect to find row direction."""
+def _row_count(x, y, polygon, h=None):
+    """Number of crop rows in the plot (4.0.3): seeder-pitch comb on the 2 cm canopy-top ridges across the plot
+    (grid_rows.rows_from_points) when heights are given; the old 5 cm density-peak count otherwise."""
     if len(x) < 50: return 0
+    if h is not None:
+        try:
+            from .grid_rows import _frame as _row_frame, rows_from_points
+            c0, a_u, a_v, hl_, hw_ = _row_frame(polygon); x = np.asarray(x, float); y = np.asarray(y, float)
+            uu = (x - c0[0]) * a_u[0] + (y - c0[1]) * a_u[1]; vv = (x - c0[0]) * a_v[0] + (y - c0[1]) * a_v[1]
+            return int(rows_from_points(uu, vv, np.asarray(h, float), hw_, hl_)["n_rows_geom"])
+        except Exception:
+            pass
     try:
         from shapely.geometry import box as shp_box
         # Project points onto the polygon's short axis using min rotated rect

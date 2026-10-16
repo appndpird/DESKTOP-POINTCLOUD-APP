@@ -20,7 +20,12 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPush
 from phenoapp.core.project import state
 from phenoapp.core import load_grid, LASManager, VNIRCube
 from phenoapp.core.deep_models import (auto_select_env, probe_env, prepare_plot_tensors, prepare_tensors_from_dataset, prepare_tensors_from_flight_folder,
-                                       flight_folder_files, run_two_stream, pretrained_weights_dir, find_torch_pythons)
+                                       flight_folder_files, flight_folder_rgb, run_two_stream, pretrained_weights_dir, find_torch_pythons, RGB_VARIANTS)
+VARIANTS = ["two_stream", "lidar_only", "vnir_only", "rgb_only", "lidar_rgb"]
+VARIANT_TIP = ("two_stream = LiDAR cloud + VNIR pixel spectra (bundled pretrained ensembles); lidar_only / vnir_only = one stream (bundled); "
+               "rgb_only = 2-D CNN on the per-plot RGB image (1 cm, plot frame); lidar_rgb = LiDAR cloud + RGB image. The RGB variants need the "
+               "per-plot RGB crops of the RGB Features tab (or the orthomosaic in 'This flight' mode) and have no bundled weights yet: train them "
+               "on the 'Train from scratch' page, then use the run folder as weights.")
 from phenoapp.core.model_runs import models_root, KIND_DIR
 from phenoapp.ui.common import file_row
 
@@ -35,16 +40,16 @@ class _Probe(QThread):
 
 class _PrepFlight(QThread):
     progress = pyqtSignal(int, str); done_ok = pyqtSignal(str); error = pyqtSignal(str)
-    def __init__(self, las, vnir, grid, crs, out_dir, name, stage, gt_csv, region_mode, band_width):
-        super().__init__(); self._a = (las, vnir, grid, crs, out_dir, name, stage, gt_csv, region_mode, band_width)
+    def __init__(self, las, vnir, grid, crs, out_dir, name, stage, gt_csv, region_mode, band_width, rgb_tif=None):
+        super().__init__(); self._a = (las, vnir, grid, crs, out_dir, name, stage, gt_csv, region_mode, band_width, rgb_tif)
     def run(self):
         try:
             import pandas as pd
-            las, vnir, grid, crs, out_dir, name, stage, gt_csv, region_mode, band_width = self._a
+            las, vnir, grid, crs, out_dir, name, stage, gt_csv, region_mode, band_width, rgb_tif = self._a
             self.progress.emit(1, "loading point cloud..."); mgr = LASManager(las, crs, use_smrf=False); mgr.load(progress_cb=lambda p, m: None)
             from phenoapp.core.dataset import read_csv
             cube = VNIRCube(vnir); plots = load_grid(grid, target_crs=crs); gt = read_csv(gt_csv) if gt_csv and os.path.exists(gt_csv) else None
-            idx = prepare_plot_tensors(mgr, cube, plots, out_dir, name, stage, gt=gt, progress_cb=lambda p, m: self.progress.emit(p, m), region_mode=region_mode, band_width=band_width)
+            idx = prepare_plot_tensors(mgr, cube, plots, out_dir, name, stage, gt=gt, progress_cb=lambda p, m: self.progress.emit(p, m), region_mode=region_mode, band_width=band_width, rgb_tif=rgb_tif)
             cube.close(); del mgr
             self.done_ok.emit(f"{len(idx[idx.dataset == name])} plot tensors written to {os.path.join(out_dir, name)}\nindex -> {os.path.join(out_dir, 'index.csv')}")
         except Exception as e:
@@ -233,7 +238,7 @@ class DeepTab(QWidget):
         self.ed_weights = QLineEdit(pretrained_weights_dir()); f.addRow("Weights folder:", file_row(w, self.ed_weights, "Weights folder", directory=True))
         self.ed_weights.setToolTip("Folder with <variant>_<target>_fold<k>.pt files (+ fold_scores.csv, common_bands.csv): the bundled assets/dl_models, "
                                    "a Models/<kind>/<run>_two_stream folder of a training run, or an unzipped weights release.")
-        self.cb_target_p = QComboBox(); self.cb_target_p.addItems(["biomass", "height"]); self.cb_variant_p = QComboBox(); self.cb_variant_p.addItems(["two_stream", "lidar_only", "vnir_only"])
+        self.cb_target_p = QComboBox(); self.cb_target_p.addItems(["biomass", "height"]); self.cb_variant_p = QComboBox(); self.cb_variant_p.addItems(VARIANTS); self.cb_variant_p.setToolTip(VARIANT_TIP)
         self.cb_fsel = QComboBox(); self.cb_fsel.addItems(["all fold models (average of every fold model in the weights folder)", "best three folds (lowest test RMSE in fold_scores.csv) - optimistic scores"])
         row = QHBoxLayout(); row.addWidget(QLabel("target")); row.addWidget(self.cb_target_p); row.addWidget(QLabel("variant")); row.addWidget(self.cb_variant_p); row.addStretch(); f.addRow("Options:", row)
         f.addRow("Fold models:", self.cb_fsel)
@@ -248,7 +253,7 @@ class DeepTab(QWidget):
         w = QWidget(); v = QVBoxLayout(w)
         self.src_t = _TensorSource(w, multi=True); self.src_t.rb_dataset.setChecked(True); self.src_t.btn.clicked.connect(lambda: self._prep(self.src_t)); v.addWidget(self.src_t)
         g = QGroupBox("Training"); f = QFormLayout(g)
-        self.cb_target_t = QComboBox(); self.cb_target_t.addItems(["biomass", "height"]); self.cb_variant_t = QComboBox(); self.cb_variant_t.addItems(["two_stream", "lidar_only", "vnir_only"])
+        self.cb_target_t = QComboBox(); self.cb_target_t.addItems(["biomass", "height"]); self.cb_variant_t = QComboBox(); self.cb_variant_t.addItems(VARIANTS); self.cb_variant_t.setToolTip(VARIANT_TIP)
         self.sp_epochs = QSpinBox(); self.sp_epochs.setRange(5, 500); self.sp_epochs.setValue(100); self.sp_folds = QSpinBox(); self.sp_folds.setRange(2, 20); self.sp_folds.setValue(10)
         row = QHBoxLayout()
         for lab, wd in (("target", self.cb_target_t), ("variant", self.cb_variant_t), ("epochs", self.sp_epochs), ("folds", self.sp_folds)):
@@ -296,12 +301,15 @@ class DeepTab(QWidget):
             d = src.ed_folder.text().strip()
             las, tif = flight_folder_files(d) if d else ({}, {})
             if not d or not os.path.isdir(d): QMessageBox.warning(self, "No flight folder", "Pick the flight folder that holds plots_lidar and plots_vnir."); src.btn.setEnabled(True); return
-            if variant != "vnir_only" and not las:
-                QMessageBox.warning(self, "No per-plot LAS files", f"No plot_<id>_*.las in {os.path.join(d, 'plots_lidar')}.\nRun the LiDAR Features tab on this flight first, or choose the vnir_only variant."); src.btn.setEnabled(True); return
-            if variant != "lidar_only" and not tif:
+            if variant in ("two_stream", "lidar_only", "lidar_rgb") and not las:
+                QMessageBox.warning(self, "No per-plot LAS files", f"No plot_<id>_*.las in {os.path.join(d, 'plots_lidar')}.\nRun the LiDAR Features tab on this flight first, or choose the vnir_only / rgb_only variant."); src.btn.setEnabled(True); return
+            if variant in ("two_stream", "vnir_only") and not tif:
                 QMessageBox.warning(self, "No per-plot VNIR cubes", f"No plot_<id>_*.tif in {os.path.join(d, 'plots_vnir')}.\nRun the VNIR Spectral Features tab on this flight first, or choose the lidar_only variant."); src.btn.setEnabled(True); return
+            rgbs = flight_folder_rgb(d)
+            if variant in RGB_VARIANTS and not rgbs:
+                QMessageBox.warning(self, "No per-plot RGB crops", f"No plot_<id>_*.tif in {os.path.join(d, 'plots_rgb')}.\nRun the RGB Features tab on this flight first (per-plot crops ticked)."); src.btn.setEnabled(True); return
             name = src.ed_name.text().strip() or os.path.basename(d.rstrip("\\/")); s.flight_name = name; s.stage = src.cb_stage.currentText()
-            self.out.append(f"plot tensors from {d}: {len(las)} LAS files, {len(tif)} VNIR cubes, variant {variant}")
+            self.out.append(f"plot tensors from {d}: {len(las)} LAS files, {len(tif)} VNIR cubes, {len(rgbs)} RGB crops, variant {variant}")
             self._pp = _PrepFolder(d, name, src.cb_stage.currentText(), src.ed_gt.text().strip(), out, variant)
         elif src.rb_flight.isChecked():
             for nm, p, hint in (("LAS", s.las_path, "Project"), ("VNIR cube", s.vnir_path, "VNIR Spectral Features")):
@@ -312,7 +320,8 @@ class DeepTab(QWidget):
             grid = s.grid_file()
             if not grid or not os.path.exists(grid): QMessageBox.warning(self, "No grid", "Load / align a plot grid first."); src.btn.setEnabled(True); return
             name = src.ed_name.text().strip() or s.flight_name or "flight"; s.flight_name = name; s.stage = src.cb_stage.currentText()
-            self._pp = _PrepFlight(s.las_path, s.vnir_path, grid, s.work_crs, out, name, src.cb_stage.currentText(), src.ed_gt.text().strip(), s.region_mode, s.band_width)
+            self._pp = _PrepFlight(s.las_path, s.vnir_path, grid, s.work_crs, out, name, src.cb_stage.currentText(), src.ed_gt.text().strip(), s.region_mode, s.band_width,
+                                   rgb_tif=(s.ortho_tif if (s.ortho_tif and os.path.exists(s.ortho_tif)) else None))
         else:
             d = src.ed_dataset.text().strip(); fl = src.flights()
             if not d or not fl: QMessageBox.warning(self, "No flights", "Pick a dataset folder and select the flight(s)."); src.btn.setEnabled(True); return
