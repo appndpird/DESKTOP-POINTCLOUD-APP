@@ -18,6 +18,11 @@
   with an inside mask) and `lidar_rgb` (LiDAR cloud + RGB image) for height and biomass. The plot tensors carry an `rgb`
   image when the flight folder has `plots_rgb` crops, the dataset has `rgb/<flight>/plots`, or the orthomosaic is loaded
   in *This flight* mode. No bundled weights yet: train on the *Train from scratch* page and use the run folder as weights.
+- **VNIR vegetation mask on a senesced canopy.** When the Otsu NDVI mask leaves fewer than 5 % vegetation pixels in more
+  than a quarter of the plots (maturity flights), the VNIR features now use whole-plot spectra (`veg_ndvi_threshold` = NaN)
+  instead of emptying those plots. Found on the AGT 2025-11-13 flights, whose delivered cubes were also at-sensor radiance
+  (oxygen and water-vapour absorption dips present, NDVI 0): an empirical-line gain against the calibrated 2025-09-22 cube over
+  unchanged soil recovers reflectance to within the soil-moisture factor (recipe in the flight folders' README).
 - **Class-threshold study** (docs/threshold_study): ground 8 cm / canopy 10 cm confirmed as the default; top-of-canopy
   percentiles and `cth_*` are insensitive, canopy-mass features (H_mean, cover, Pgap, voxel volume) and the pretrained
   models are not - keep 8 / 10 whenever a bundled model is applied.

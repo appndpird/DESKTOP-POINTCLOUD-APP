@@ -70,6 +70,13 @@ def vnir_features_all(cube, plots, regions, indices=None, progress_cb=None, excl
         veg_t = float("nan"); veg = np.isfinite(ndvi)
     else:
         veg = ndvi >= veg_t
+        # senesced canopy (4.0.3): when the Otsu mask leaves fewer than 5 % vegetation pixels in more than a quarter of the plots
+        # (maturity flights: the canopy NDVI sits just under the soil / crop threshold), the mask would empty those plots' spectra ->
+        # use whole-plot spectra instead (veg_ndvi_threshold = NaN, same as the no-contrast case)
+        _nv = np.bincount(np.where(veg, lab_sel, 0), minlength=n_plots + 1)[1:]; _na = np.bincount(np.where(np.isfinite(ndvi), lab_sel, 0), minlength=n_plots + 1)[1:]
+        _has = _na > 50
+        if _has.any() and float(np.mean((_nv[_has] / np.maximum(_na[_has], 1)) < 0.05)) > 0.25:
+            veg_t = float("nan"); veg = np.isfinite(ndvi)
     vals = {}
     for bname, idx in need.items():
         sub = S[:, idx].astype(np.float32); ok = (sub > 0).all(1); vals[bname] = np.where(ok, sub.mean(1) / scale, np.nan)
