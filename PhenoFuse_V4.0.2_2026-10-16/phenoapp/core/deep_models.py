@@ -52,18 +52,33 @@ def pretrained_weights_dir() -> str:
     return os.path.join(_pkg_root(), "assets", "dl_models")
 
 
-def find_torch_pythons():
-    """Interpreters likely to have torch: the running one, conda envs, common install locations."""
-    cands = [sys.executable]
+def _site_packages(python_exe):
+    d = os.path.dirname(python_exe)
+    return [sp for sp in [os.path.join(d, "Lib", "site-packages"), os.path.join(d, "..", "lib", "site-packages")] +
+            glob.glob(os.path.join(d, "..", "lib", "python3*", "site-packages")) if os.path.isdir(sp)]
+
+
+def _has_pkg(python_exe, pkg):
+    """Cheap check (no subprocess): the package folder exists in the interpreter's site-packages."""
+    return any(os.path.isdir(os.path.join(sp, pkg)) for sp in _site_packages(python_exe))
+
+
+def find_torch_pythons(only_with_torch=True):
+    """Interpreters with torch (conda envs, common install locations, the running one when it is a real Python); the ones that
+    also have spconv come first. The frozen PhenoFuse.exe is never offered. only_with_torch=False lists every interpreter found."""
+    cands = [] if getattr(sys, "frozen", False) else [sys.executable]
     home = os.path.expanduser("~")
     for pat in (os.path.join(home, ".conda", "envs", "*", "python.exe"), os.path.join(home, "anaconda3", "envs", "*", "python.exe"), os.path.join(home, "miniconda3", "envs", "*", "python.exe"),
-                r"C:\ProgramData\anaconda3\envs\*\python.exe", os.path.join(home, ".conda", "envs", "*", "bin", "python"), "/opt/conda/envs/*/bin/python"):
+                r"C:\ProgramData\anaconda3\envs\*\python.exe", os.path.join(home, "anaconda3", "python.exe"), os.path.join(home, "miniconda3", "python.exe"),
+                os.path.join(home, ".conda", "envs", "*", "bin", "python"), "/opt/conda/envs/*/bin/python"):
         cands += sorted(glob.glob(pat))
     seen, out = set(), []
     for c in cands:
         if c and os.path.exists(c) and c.lower() not in seen:
-            seen.add(c.lower()); out.append(c)
-    return out
+            seen.add(c.lower())
+            if not only_with_torch or _has_pkg(c, "torch"):
+                out.append(c)
+    return sorted(out, key=lambda c: 0 if _has_pkg(c, "spconv") else 1)
 
 
 def probe_env(python_exe: str, timeout=120) -> dict:
@@ -235,26 +250,71 @@ def _read_plot_cube(path):
     return arr[:, inside].T, wl
 
 
+def per_plot_files(folder, ext):
+    """{plot id: path} of the per-plot files 'plot_<id>_*.<ext>' in a folder; a '_classified' LAS (LiDAR Features tab output,
+    HeightAboveGround + classes) wins over a raw cut of the same plot."""
+    out = {}
+    for f in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
+        m = re.match(r"^plot_(\d+)[_.]", f)
+        if m and f.lower().endswith(ext):
+            pid = int(m.group(1))
+            if pid not in out or "_classified" in f.lower():
+                out[pid] = os.path.join(folder, f)
+    return out
+
+
+def flight_folder_files(folder):
+    """(las_files, tif_files) of a flight folder written by the LiDAR / VNIR Spectral Features tabs:
+    <flight>/plots_lidar/plot_<id>_*.las and <flight>/plots_vnir/plot_<id>_*.tif (the folder itself is accepted too)."""
+    folder = folder or ""
+    las = per_plot_files(os.path.join(folder, "plots_lidar"), ".las") or per_plot_files(folder, ".las")
+    tif = per_plot_files(os.path.join(folder, "plots_vnir"), ".tif") or per_plot_files(folder, ".tif")
+    return las, tif
+
+
 def prepare_tensors_from_dataset(dataset_dir, flights, out_dir, progress_cb=None, variant="two_stream"):
     """Write dl_data tensors for every selected flight of a dataset folder (lidar/<flight>/plots/*.las and
     vnir/<flight>/plots/plot_<id>_*.tif + ground_truth.csv). variant 'lidar_only' / 'vnir_only' needs only that modality."""
-    import pandas as pd
-    from .dataset import read_manifest, gt_path
-    man = read_manifest(dataset_dir); rng = np.random.default_rng(0); rows = []
-    need_lidar = variant != "vnir_only"; need_vnir = variant != "lidar_only"
-    for fi, fl in enumerate(flights):
-        meta = man.get("flights", {}).get(fl, {}); stage = meta.get("stage", "")
+    from .dataset import read_manifest, gt_path, read_csv
+    man = read_manifest(dataset_dir); specs = []
+    for fl in flights:
+        meta = man.get("flights", {}).get(fl, {})
         ldir = os.path.join(dataset_dir, "lidar", fl, "plots"); vdir = os.path.join(dataset_dir, "vnir", fl, "plots")
-        las_files = {int(m.group(1)): os.path.join(ldir, f) for f in (os.listdir(ldir) if os.path.isdir(ldir) else []) for m in [re.match(r"^plot_(\d+)[_.]", f)] if m and f.lower().endswith(".las")}
-        tif_files = {int(m.group(1)): os.path.join(vdir, f) for f in (os.listdir(vdir) if os.path.isdir(vdir) else []) for m in [re.match(r"^plot_(\d+)[_.]", f)] if m and f.lower().endswith(".tif")}
+        g = gt_path(dataset_dir, fl)
+        specs.append(dict(name=fl, stage=meta.get("stage", ""), las_files=per_plot_files(ldir, ".las"), tif_files=per_plot_files(vdir, ".tif"),
+                          gt=read_csv(g) if g else None, lidar_dir=ldir, vnir_dir=vdir))
+    return prepare_tensors_from_files(specs, out_dir, progress_cb=progress_cb, variant=variant)
+
+
+def prepare_tensors_from_flight_folder(folder, name, stage, out_dir, gt_csv=None, progress_cb=None, variant="two_stream"):
+    """Write dl_data tensors of ONE flight from the per-plot files already extracted into its flight folder
+    (plots_lidar/*.las of the LiDAR Features tab, plots_vnir/*.tif of the VNIR Spectral Features tab); no project LAS / cube needed."""
+    from .dataset import read_csv
+    las, tif = flight_folder_files(folder)
+    gt = read_csv(gt_csv) if gt_csv and os.path.exists(gt_csv) else None
+    spec = dict(name=name, stage=stage, las_files=las, tif_files=tif, gt=gt, lidar_dir=os.path.join(folder, "plots_lidar"), vnir_dir=os.path.join(folder, "plots_vnir"))
+    return prepare_tensors_from_files([spec], out_dir, progress_cb=progress_cb, variant=variant)
+
+
+def prepare_tensors_from_files(specs, out_dir, progress_cb=None, variant="two_stream"):
+    """Shared tensor writer: specs = [{name, stage, las_files {pid: path}, tif_files {pid: path}, gt (DataFrame with Plot_ID or None)}].
+    variant 'lidar_only' / 'vnir_only' needs only that modality."""
+    import pandas as pd
+    rng = np.random.default_rng(0); rows = []; flights = [sp["name"] for sp in specs]
+    need_lidar = variant != "vnir_only"; need_vnir = variant != "lidar_only"
+    for fi, sp in enumerate(specs):
+        fl = sp["name"]; stage = sp.get("stage", "") or ""; las_files = sp["las_files"]; tif_files = sp["tif_files"]
         if need_lidar and not las_files:
-            raise RuntimeError(f"{fl}: no per-plot LAS files in {ldir}")
+            raise RuntimeError(f"{fl}: no per-plot LAS files (plot_<id>_*.las) in {sp.get('lidar_dir', '?')}")
         if need_vnir and not tif_files:
-            raise RuntimeError(f"{fl}: no per-plot VNIR cubes in {vdir}")
+            raise RuntimeError(f"{fl}: no per-plot VNIR cubes (plot_<id>_*.tif) in {sp.get('vnir_dir', '?')}")
         pids = sorted((set(las_files) if need_lidar else set(tif_files)) & (set(tif_files) if need_vnir else set(las_files)) if (need_lidar and need_vnir)
                       else (set(las_files) if need_lidar else set(tif_files)))
-        from .dataset import read_csv
-        g = gt_path(dataset_dir, fl); gtm = read_csv(g).set_index("Plot_ID") if g else None
+        gt = sp.get("gt")
+        gtm = None
+        if gt is not None and "Plot_ID" in gt.columns:
+            gtm = gt.copy(); gtm["Plot_ID"] = pd.to_numeric(gtm["Plot_ID"], errors="coerce"); gtm = gtm.dropna(subset=["Plot_ID"])
+            gtm["Plot_ID"] = gtm["Plot_ID"].astype(int); gtm = gtm.drop_duplicates("Plot_ID").set_index("Plot_ID")
         os.makedirs(os.path.join(out_dir, fl), exist_ok=True)
         # flight-level vegetation threshold from a sample of plots
         veg_t = 0.3; refl_ok = True; wl = None

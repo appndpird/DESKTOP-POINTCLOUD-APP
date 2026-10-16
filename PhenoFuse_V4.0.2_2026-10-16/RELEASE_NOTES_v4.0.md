@@ -1,5 +1,12 @@
 # PhenoFuse 4.0.2 (2026-10-16) - pretrained models on a new flight
 
+- **Deep Models on a flight that is already extracted.** The tensor source gained a third option, *Flight folder*: the
+  per-plot classified LAS files and VNIR cubes that the LiDAR Features and VNIR Spectral Features tabs wrote
+  (`plots_lidar\plot_<id>_*.las`, `plots_vnir\plot_<id>_*.tif`) are used directly, so a pretrained deep ensemble runs on a
+  flight without loading the project LAS, cube and grid again. The folder is guessed from the ground-truth CSV or the
+  project folder, and *This flight* falls back to it when no project LAS is loaded (before: "No LAS - set the LAS on the
+  Project tab first"). The "Python with torch" list now offers only interpreters that actually have torch (spconv ones
+  first) and never the PhenoFuse executable itself.
 - **LightGBM bundled.** The Muresk maturity biomass ensembles (fused and LiDAR) contain a LightGBM member; 4.0.1 shipped
   without the `lightgbm` module, so loading them failed with `No module named 'lightgbm'`. The build environment now has
   lightgbm 4.6.0 (the version the research models were trained with) and the executable bundles it.

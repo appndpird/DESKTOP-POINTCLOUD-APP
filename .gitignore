@@ -6,3 +6,5 @@ dist/
 *.zip
 !phenoapp_full.zip
 phenoapp_crash.log
+Phenoapp_V3.3.4/
+prompt.txt

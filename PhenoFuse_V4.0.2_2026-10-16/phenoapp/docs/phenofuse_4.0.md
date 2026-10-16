@@ -104,6 +104,19 @@ tall stubble, lower them for short crops at early stages, and keep them identica
 Every tab sits in a scroll area, so the window can be dragged from any edge down to 480 x 360 pixels; it opens at 90 % of
 the screen at most.
 
+### Deep Models on an extracted flight (4.0.2)
+
+The pretrained deep ensembles need plot tensors, and the Deep Models tab can build them from three sources: *This flight*
+(project LAS + VNIR cube + grid, cut now), *Flight folder* (the per-plot files already written by the LiDAR Features and
+VNIR Spectral Features tabs: `plots_lidar\plot_<id>_*_classified.las` and `plots_vnir\plot_<id>_*.tif`), or a *Dataset
+folder*. For a flight that has been through tabs 6 and 7, pick *Flight folder*: the folder is guessed from the ground-truth
+CSV or the project folder, the flight name from the folder name, and the tensors go to `<flight>\dl_data`. *This flight*
+switches to the folder by itself when no project LAS is loaded. Variant `lidar_only` needs only the LAS files,
+`vnir_only` only the cubes. The "Python with torch" list offers the interpreters on this machine that have torch
+installed (those with spconv first); press "Probe selected" to see the torch version and GPU. Predictions land in
+`<flight>\Models\predictions\<flight>_<target>_<variant>_twostream_<weights>.csv` with the per-fold spread and, when a
+ground-truth CSV was given, the measured values and the R2 / RMSE in the log.
+
 ### Pretrained models on a new flight (4.0.2)
 
 A bundled model was trained on one trial, flight and growth stage (its description names them). Before trusting its

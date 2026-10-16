@@ -19,8 +19,8 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPush
 
 from phenoapp.core.project import state
 from phenoapp.core import load_grid, LASManager, VNIRCube
-from phenoapp.core.deep_models import (auto_select_env, probe_env, prepare_plot_tensors, prepare_tensors_from_dataset, run_two_stream,
-                                       pretrained_weights_dir, find_torch_pythons)
+from phenoapp.core.deep_models import (auto_select_env, probe_env, prepare_plot_tensors, prepare_tensors_from_dataset, prepare_tensors_from_flight_folder,
+                                       flight_folder_files, run_two_stream, pretrained_weights_dir, find_torch_pythons)
 from phenoapp.core.model_runs import models_root, KIND_DIR
 from phenoapp.ui.common import file_row
 
@@ -69,6 +69,24 @@ class _PrepDataset(QThread):
             import traceback; self.error.emit(f"{e}\n\n{traceback.format_exc()}")
 
 
+class _PrepFolder(QThread):
+    progress = pyqtSignal(int, str); done_ok = pyqtSignal(str); error = pyqtSignal(str)
+    def __init__(self, folder, name, stage, gt_csv, out_dir, variant):
+        super().__init__(); self._a = (folder, name, stage, gt_csv, out_dir, variant)
+    def run(self):
+        try:
+            folder, name, stage, gt_csv, out_dir, variant = self._a
+            idx = prepare_tensors_from_flight_folder(folder, name, stage, out_dir, gt_csv=gt_csv, progress_cb=lambda p, m: self.progress.emit(p, m), variant=variant)
+            n = idx[idx.dataset == name]
+            txt = f"{len(n)} plot tensors of {name} (per-plot files of {folder}) -> {os.path.join(out_dir, name)}\nindex -> {os.path.join(out_dir, 'index.csv')}\n" + \
+                  f"  {int(n.biomass_kg_ha.notna().sum())} plots with biomass, {int(n.height_cm.notna().sum())} with height" + ("" if gt_csv else " (no ground truth given: prediction only)")
+            if os.path.exists(os.path.join(out_dir, "tensor_errors.csv")):
+                txt += f"\nsome plots failed - see {os.path.join(out_dir, 'tensor_errors.csv')}"
+            self.done_ok.emit(txt)
+        except Exception as e:
+            import traceback; self.error.emit(f"{e}\n\n{traceback.format_exc()}")
+
+
 class _Run(QThread):
     line = pyqtSignal(str); done_ok = pyqtSignal(int)
     def __init__(self, *a, **k): super().__init__(); self.a = a; self.k = k
@@ -79,12 +97,17 @@ class _Run(QThread):
 
 
 class _TensorSource(QGroupBox):
-    """Plot tensors: from this flight (LAS + cube + grid) or from flights of a dataset folder (per-plot files)."""
+    """Plot tensors: from this flight (LAS + cube + grid), from the per-plot files of a flight folder (plots_lidar / plots_vnir
+    written by the LiDAR / VNIR Spectral Features tabs) or from flights of a dataset folder."""
     def __init__(self, parent, multi):
         super().__init__("Plot tensors (LiDAR v3 preprocessing + cleaned VNIR pixels per plot)", parent)
         f = QFormLayout(self); self.multi = multi
-        self.rb_flight = QRadioButton("This flight: project LAS + VNIR cube + grid"); self.rb_dataset = QRadioButton("Dataset folder: per-plot LAS files + VNIR cubes of the selected flight(s)")
-        self.rb_flight.setChecked(True); f.addRow(self.rb_flight); f.addRow(self.rb_dataset)
+        self.rb_flight = QRadioButton("This flight: project LAS + VNIR cube + grid (cut the plots now)")
+        self.rb_folder = QRadioButton("Flight folder: per-plot LAS files + VNIR cubes already extracted (plots_lidar / plots_vnir of the LiDAR and VNIR Features tabs)")
+        self.rb_dataset = QRadioButton("Dataset folder: per-plot LAS files + VNIR cubes of the selected flight(s)")
+        self.rb_flight.setChecked(True); f.addRow(self.rb_flight); f.addRow(self.rb_folder); f.addRow(self.rb_dataset)
+        self.ed_folder = QLineEdit(); self.ed_folder.setPlaceholderText("flight folder holding plots_lidar\\plot_<id>_*.las and plots_vnir\\plot_<id>_*.tif")
+        f.addRow("Flight folder:", file_row(self, self.ed_folder, "Flight folder", directory=True, on_change=lambda p: self._folder_changed()))
         self.ed_name = QLineEdit(); self.cb_stage = QComboBox(); self.cb_stage.setEditable(True); self.cb_stage.addItems(["anthesis", "maturity"])
         row = QHBoxLayout(); row.addWidget(self.ed_name, stretch=2); row.addWidget(QLabel("stage:")); row.addWidget(self.cb_stage); f.addRow("Flight name:", row)
         self.ed_gt = QLineEdit(); self.ed_gt.setPlaceholderText("optional: Plot_ID, biomass_kg_ha and/or height_cm (needed for training / scoring)")
@@ -95,20 +118,52 @@ class _TensorSource(QGroupBox):
         f.addRow("Flights:" if multi else "Flight:", row)
         self.ed_out = QLineEdit(); f.addRow("Tensor folder (dl_data):", file_row(self, self.ed_out, "Tensor folder", directory=True))
         self.btn = QPushButton("Prepare plot tensors"); f.addRow("", self.btn)
-        self.rb_flight.toggled.connect(self._mode); self._mode()
+        for rb in (self.rb_flight, self.rb_folder, self.rb_dataset): rb.toggled.connect(self._mode)
+        self._mode()
 
     def _mode(self):
-        fl = self.rb_flight.isChecked()
-        for w in (self.ed_name, self.cb_stage, self.ed_gt): w.setEnabled(fl)
-        for w in (self.ed_dataset, self.lst): w.setEnabled(not fl)
+        fl = self.rb_flight.isChecked(); fo = self.rb_folder.isChecked(); ds = self.rb_dataset.isChecked()
+        for w in (self.ed_name, self.cb_stage, self.ed_gt): w.setEnabled(fl or fo)
+        self.ed_folder.setEnabled(fo)
+        for w in (self.ed_dataset, self.lst): w.setEnabled(ds)
+
+    @staticmethod
+    def _looks_like_flight_folder(d):
+        if not d or not os.path.isdir(d): return False
+        las, tif = flight_folder_files(d)
+        return bool(las or tif)
+
+    def _folder_changed(self):
+        d = self.ed_folder.text().strip()
+        if not d: return
+        if not self.ed_name.text().strip() or self.ed_name.text().strip() == getattr(self, "_auto_name", None):
+            self.ed_name.setText(os.path.basename(d.rstrip("\\/"))); self._auto_name = self.ed_name.text()
+        if not self.ed_gt.text().strip():
+            for g in ("ground_truth.csv", "plant_height_ground_truth.csv", "biomass_kg_ha.csv"):
+                if os.path.exists(os.path.join(d, g)): self.ed_gt.setText(os.path.join(d, g)); break
+        cur = self.ed_out.text().strip()
+        if not cur or (cur.endswith("dl_data") and not cur.startswith(d)):
+            self.ed_out.setText(os.path.join(d, "dl_data"))
 
     def sync(self):
         s = state()
         if not self.ed_name.text().strip() and s.flight_name: self.ed_name.setText(s.flight_name)
         if not self.ed_gt.text().strip() and s.gt_csv: self.ed_gt.setText(s.gt_csv)
         if not self.ed_dataset.text().strip() and s.dataset_dir: self.ed_dataset.setText(s.dataset_dir); self.refresh()
+        if not self.ed_folder.text().strip():
+            # guess the flight folder: the folder of the ground-truth CSV, the project folder or a parent of either holding plots_lidar / plots_vnir
+            cands = []
+            for p in (self.ed_gt.text().strip(), s.gt_csv, s.proj_dir, s.las_path, s.vnir_path):
+                if p:
+                    d = p if os.path.isdir(p) else os.path.dirname(p)
+                    cands += [d, os.path.dirname(d)]
+            for d in cands:
+                if self._looks_like_flight_folder(d):
+                    self.ed_folder.setText(d); self._folder_changed(); break
+        if self.rb_flight.isChecked() and not self.multi and self.ed_folder.text().strip() and not (s.las_path and os.path.exists(s.las_path)):
+            self.rb_folder.setChecked(True)            # no project LAS loaded but a flight folder with per-plot files is known
         if not self.ed_out.text().strip():
-            base = self.ed_dataset.text().strip() if self.rb_dataset.isChecked() else s.proj_dir
+            base = self.ed_dataset.text().strip() if self.rb_dataset.isChecked() else (self.ed_folder.text().strip() if self.rb_folder.isChecked() else s.proj_dir)
             if base: self.ed_out.setText(os.path.join(base, "dl_data"))
         self.cb_stage.setCurrentText(s.stage or "anthesis")
 
@@ -130,11 +185,22 @@ class _TensorSource(QGroupBox):
     def flights(self):
         return [self.lst.item(i).text().split("   [")[0] for i in range(self.lst.count()) if self.lst.item(i).isSelected()]
 
+    def base_dir(self):
+        """Folder whose Models/ receives runs and predictions: dataset folder, flight folder or project folder."""
+        s = state()
+        if self.rb_dataset.isChecked(): return self.ed_dataset.text().strip()
+        if self.rb_folder.isChecked(): return self.ed_folder.text().strip() or s.proj_dir
+        return s.proj_dir
+
+    def flight_name(self):
+        s = state()
+        if self.rb_dataset.isChecked() and self.flights(): return self.flights()[0]
+        return self.ed_name.text().strip() or s.flight_name or "flight"
+
     def data_dir(self):
-        s = state(); d = self.ed_out.text().strip()
+        d = self.ed_out.text().strip()
         if d: return d
-        base = self.ed_dataset.text().strip() if self.rb_dataset.isChecked() else s.proj_dir
-        return os.path.join(base or os.path.expanduser("~"), "dl_data")
+        return os.path.join(self.base_dir() or os.path.expanduser("~"), "dl_data")
 
 
 class DeepTab(QWidget):
@@ -203,8 +269,8 @@ class DeepTab(QWidget):
         super().showEvent(ev); self.src_p.sync(); self.src_t.sync(); self._update_out()
 
     def _update_out(self):
-        s = state(); base = self.src_t.ed_dataset.text().strip() if self.src_t.rb_dataset.isChecked() else s.proj_dir
-        self.lbl_out.setText(os.path.join(models_root(base), "...") if base else "(pick a dataset / load a project)")
+        base = self.src_t.base_dir()
+        self.lbl_out.setText(os.path.join(models_root(base), "...") if base else "(pick a dataset / flight folder or load a project)")
 
     def _auto(self):
         self.lbl_env.setText("probing environments..."); self._pr = _Probe(None); self._pr.done.connect(self._on_probe); self._pr.start()
@@ -222,9 +288,27 @@ class DeepTab(QWidget):
 
     def _prep(self, src):
         s = state(); out = src.data_dir(); src.btn.setEnabled(False); self.progress.setValue(0)
-        if src.rb_flight.isChecked():
-            for nm, p in (("LAS", s.las_path), ("VNIR cube", s.vnir_path)):
-                if not p or not os.path.exists(p): QMessageBox.warning(self, f"No {nm}", f"Set the {nm} on the Project / VNIR Spectral Features tab first."); src.btn.setEnabled(True); return
+        variant = (self.cb_variant_t if src is self.src_t else self.cb_variant_p).currentText()
+        if src.rb_flight.isChecked() and not (s.las_path and os.path.exists(s.las_path)) and src._looks_like_flight_folder(src.ed_folder.text().strip()):
+            src.rb_folder.setChecked(True)             # fall back to the per-plot files already on disk
+            self.out.append(f"no project LAS loaded: using the per-plot files of the flight folder {src.ed_folder.text().strip()}")
+        if src.rb_folder.isChecked():
+            d = src.ed_folder.text().strip()
+            las, tif = flight_folder_files(d) if d else ({}, {})
+            if not d or not os.path.isdir(d): QMessageBox.warning(self, "No flight folder", "Pick the flight folder that holds plots_lidar and plots_vnir."); src.btn.setEnabled(True); return
+            if variant != "vnir_only" and not las:
+                QMessageBox.warning(self, "No per-plot LAS files", f"No plot_<id>_*.las in {os.path.join(d, 'plots_lidar')}.\nRun the LiDAR Features tab on this flight first, or choose the vnir_only variant."); src.btn.setEnabled(True); return
+            if variant != "lidar_only" and not tif:
+                QMessageBox.warning(self, "No per-plot VNIR cubes", f"No plot_<id>_*.tif in {os.path.join(d, 'plots_vnir')}.\nRun the VNIR Spectral Features tab on this flight first, or choose the lidar_only variant."); src.btn.setEnabled(True); return
+            name = src.ed_name.text().strip() or os.path.basename(d.rstrip("\\/")); s.flight_name = name; s.stage = src.cb_stage.currentText()
+            self.out.append(f"plot tensors from {d}: {len(las)} LAS files, {len(tif)} VNIR cubes, variant {variant}")
+            self._pp = _PrepFolder(d, name, src.cb_stage.currentText(), src.ed_gt.text().strip(), out, variant)
+        elif src.rb_flight.isChecked():
+            for nm, p, hint in (("LAS", s.las_path, "Project"), ("VNIR cube", s.vnir_path, "VNIR Spectral Features")):
+                if not p or not os.path.exists(p):
+                    QMessageBox.warning(self, f"No {nm}", f"Set the {nm} on the {hint} tab first - or choose 'Flight folder' above to use the per-plot files "
+                                                           f"that the LiDAR / VNIR Features tabs already wrote (plots_lidar, plots_vnir).")
+                    src.btn.setEnabled(True); return
             grid = s.grid_file()
             if not grid or not os.path.exists(grid): QMessageBox.warning(self, "No grid", "Load / align a plot grid first."); src.btn.setEnabled(True); return
             name = src.ed_name.text().strip() or s.flight_name or "flight"; s.flight_name = name; s.stage = src.cb_stage.currentText()
@@ -232,7 +316,6 @@ class DeepTab(QWidget):
         else:
             d = src.ed_dataset.text().strip(); fl = src.flights()
             if not d or not fl: QMessageBox.warning(self, "No flights", "Pick a dataset folder and select the flight(s)."); src.btn.setEnabled(True); return
-            variant = (self.cb_variant_t if src is self.src_t else self.cb_variant_p).currentText()
             self._pp = _PrepDataset(d, fl, out, variant)
         self._pp.progress.connect(lambda p, m: (self.progress.setValue(p), self.progress.setFormat(f"{p}% - {m}")))
         self._pp.done_ok.connect(lambda t: (src.btn.setEnabled(True), self.out.append(t)))
@@ -252,8 +335,8 @@ class DeepTab(QWidget):
         if not os.path.exists(os.path.join(data, "index.csv")): QMessageBox.warning(self, "No tensors", "Prepare the plot tensors first."); return
         s = state(); device = ("auto", "cuda", "cpu")[self.cb_device.currentIndex()]; target = self.cb_target_p.currentText(); variant = self.cb_variant_p.currentText()
         wdir = self.ed_weights.text().strip() or pretrained_weights_dir()
-        fl = (self.src_p.flights() or [self.src_p.ed_name.text().strip() or s.flight_name or "flight"])[0]
-        out_dir = os.path.join(os.path.dirname(data), "Models", "predictions"); os.makedirs(out_dir, exist_ok=True)
+        fl = self.src_p.flight_name()
+        out_dir = os.path.join(self.src_p.base_dir() or os.path.dirname(data), "Models", "predictions"); os.makedirs(out_dir, exist_ok=True)
         out = os.path.join(out_dir, f"{fl}_{target}_{variant}_twostream_{os.path.basename(wdir.rstrip(os.sep)) or 'weights'}.csv")
         self.btn_pred.setEnabled(False); self.out.append(f"\n=== predict: target {target}, variant {variant}, device {device}, weights {wdir}")
         self._rn = _Run(exe, "predict", data, out, target=target, device=device, variant=variant, weights=wdir, folds_select=("all", "best3")[self.cb_fsel.currentIndex()])
@@ -267,7 +350,7 @@ class DeepTab(QWidget):
         data = self.src_t.data_dir()
         if not os.path.exists(os.path.join(data, "index.csv")): QMessageBox.warning(self, "No tensors", "Prepare the plot tensors of the training flights first."); return
         s = state(); device = ("auto", "cuda", "cpu")[self.cb_device.currentIndex()]; target = self.cb_target_t.currentText(); variant = self.cb_variant_t.currentText()
-        base = self.src_t.ed_dataset.text().strip() if self.src_t.rb_dataset.isChecked() else (s.proj_dir or os.path.dirname(data))
+        base = self.src_t.base_dir() or os.path.dirname(data)
         run = time.strftime("%Y-%m-%d_%H%M") + "_" + (self.ed_run.text().strip() or target) + f"_two_stream_{variant}"
         out = os.path.join(models_root(base), KIND_DIR[target], run); os.makedirs(out, exist_ok=True)
         init = (self.ed_init.text().strip() or pretrained_weights_dir()) if self.cb_finetune.isChecked() else None

@@ -1,4 +1,4 @@
-# PhenoFuse 4.0 (2026-10-14) - multi-sensor plot phenotyping
+# PhenoFuse 4.0.2 (2026-10-16) - multi-sensor plot phenotyping
 
 **PhenoFuse** (formerly PhenoApp, "Plant Phenotyping from Point Clouds") extracts per-plot features from three UAV
 modalities - **LiDAR** point clouds, **VNIR** hyperspectral cubes and **RGB** orthomosaics - over one plot grid, and fits
@@ -39,7 +39,7 @@ conda create -n phenoapp python=3.11 -y
 conda activate phenoapp
 conda install -c conda-forge pdal python-pdal gdal geopandas shapely rasterio fiona laspy lazrs pyproj scikit-learn joblib -y
 pip install PyQt5 pyvista pyvistaqt scipy matplotlib pandas numpy xgboost lightgbm
-cd PhenoFuse_V4.0_2026-10-14
+cd PhenoFuse_V4.0.2_2026-10-16
 python run.py
 ```
 The Deep Models tab needs a second environment with torch (+ spconv for the LiDAR stream); the tab finds it automatically.
