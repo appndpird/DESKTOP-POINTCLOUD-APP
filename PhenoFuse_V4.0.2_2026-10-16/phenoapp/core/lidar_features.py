@@ -239,9 +239,10 @@ def lidar_plot_features(px, py, pz, pi, prn, pnr, rx, ry, rz, ri, poly, pre=None
         rw_ = rows_from_points(uu, vv, h, hw_, hl_, pitch_prior=ROW_PITCH_M)
         out.update(n_rows=int(rw_["n_rows_geom"]), n_rows_clear=int(rw_["n_rows"]), row_pitch_m=float(rw_["pitch"]) if np.isfinite(rw_["pitch"]) else np.nan,
                    row_offset_m=float(rw_["offset"]) if np.isfinite(rw_["offset"]) else np.nan,
-                   row_contrast=float(np.nanmean(rw_["contrast"])) if len(rw_["contrast"]) else np.nan, row_pitch_share=float(rw_["pitch_share"]))
+                   row_contrast=float(np.nanmean(rw_["contrast"])) if len(rw_["contrast"]) else np.nan, row_pitch_share=float(rw_["pitch_share"]),
+                   _row_profile=rw_.get("profile"), _row_hw=float(hw_))
     except Exception:
-        out.update(n_rows=0, n_rows_clear=0, row_pitch_m=np.nan, row_offset_m=np.nan, row_contrast=np.nan, row_pitch_share=np.nan)
+        out.update(n_rows=0, n_rows_clear=0, row_pitch_m=np.nan, row_offset_m=np.nan, row_contrast=np.nan, row_pitch_share=np.nan, _row_profile=None, _row_hw=np.nan)
     out["qc_ok"] = int(out["cover_5cm"] > 0.3 and (pre["ground_cells"] >= 15 or pre["ground_source"] == "inplot_p1") and out["n_noise_removed"] < 0.05 * n)
     return out
 
@@ -327,5 +328,27 @@ def lidar_features_all(x, y, z, intensity, return_number, number_of_returns, plo
         if progress_cb and (i % 8 == 0 or i == n - 1):
             progress_cb(int(100 * (i + 1) / n), f"LiDAR v3 features: plot {i + 1}/{n}")
     df = pd.DataFrame(rows)
+    # ---- row features, flight-level pass: one seeder pitch for the flight (median of the per-plot periodogram pitches, the
+    # clearer half of the plots weighted in), then every plot's row comb is re-fitted with that pitch (4.0.3)
+    if "_row_profile" in df.columns:
+        try:
+            from .grid_rows import rows_from_profile
+            pitch = ROW_PITCH_M
+            if pitch is None:
+                ok = df.row_pitch_m.notna() & (df.row_pitch_share >= df.row_pitch_share.median())
+                pitch = float(df.loc[ok, "row_pitch_m"].median()) if ok.any() else (float(df.row_pitch_m.median()) if df.row_pitch_m.notna().any() else None)
+            if pitch:
+                for k in df.index:
+                    prof = df.at[k, "_row_profile"]; hw_ = df.at[k, "_row_hw"]
+                    if prof is None or not np.isfinite(hw_): continue
+                    vv = -hw_ + (np.arange(len(prof)) + 0.5) * 0.02
+                    rw_ = rows_from_profile(vv, prof, -hw_ + 0.02, hw_ - 0.02, pitch_prior=pitch, step=0.02)
+                    df.at[k, "n_rows"] = int(rw_["n_rows_geom"]); df.at[k, "n_rows_clear"] = int(rw_["n_rows"]); df.at[k, "row_pitch_m"] = float(rw_["pitch"])
+                    df.at[k, "row_offset_m"] = float(rw_["offset"]) if np.isfinite(rw_["offset"]) else np.nan
+                    df.at[k, "row_contrast"] = float(np.nanmean(rw_["contrast"])) if len(rw_["contrast"]) else np.nan
+                df.attrs["row_pitch_flight_m"] = float(pitch)
+        except Exception:
+            pass
+        df = df.drop(columns=[c for c in ("_row_profile", "_row_hw") if c in df.columns])
     cols = ["Plot_ID", "area_m2", "qc_ok"] + [c for c in df.columns if c not in ("Plot_ID", "area_m2", "qc_ok")]
     return df[cols]
